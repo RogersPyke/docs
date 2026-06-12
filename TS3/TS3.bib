@@ -1,0 +1,2560 @@
+
+@misc{liu_sundial_2025,
+	title = {Sundial: {A} {Family} of {Highly} {Capable} {Time} {Series} {Foundation} {Models}},
+	shorttitle = {Sundial},
+	url = {http://arxiv.org/abs/2502.00816},
+	doi = {10.48550/arXiv.2502.00816},
+	abstract = {We introduce Sundial, a family of native, flexible, and scalable time series foundation models. To predict the next-patch's distribution, we propose a TimeFlow Loss based on flow-matching, which facilitates native pre-training of Transformers on continuous-valued time series without discrete tokenization. Conditioned on arbitrary-length time series, our models are pre-trained without specifying any prior distribution and can generate multiple probable predictions, achieving more flexibility in representation learning than using parametric densities. Towards time series foundation models, we leverage minimal but crucial adaptations of Transformers and curate TimeBench with one trillion time points, comprising mostly real-world datasets and synthetic data. By mitigating mode collapse via TimeFlow Loss, we pre-train a family of Sundial models on TimeBench, which achieve unprecedented model capacity and generalization performance. In addition to excellent scalability, Sundial achieves state-of-the-art results on both point and probabilistic forecasting benchmarks with a just-in-time inference speed, i.e., making zero-shot predictions within a few milliseconds. We believe that Sundial's pioneering generative forecasting capability can improve model reliability in real-world decision-making. Code is available at: https://github.com/thuml/Sundial.},
+	urldate = {2026-03-23},
+	publisher = {arXiv},
+	author = {Liu, Yong and Qin, Guo and Shi, Zhiyuan and Chen, Zhi and Yang, Caiyin and Huang, Xiangdong and Wang, Jianmin and Long, Mingsheng},
+	month = nov,
+	year = {2025},
+	note = {arXiv:2502.00816 [cs]},
+	keywords = {Computer Science - Machine Learning},
+	annote = {\_原始数据流匹配时序基础模型：
+
+
+划分 Patch把原始时间序列按照固定的 Patch Size（比如 30 帧）切成若干块。每块内部保持原始的连续数值，不做离散化。
+
+
+Patch‑Embed对每个 Patch，先把它的帧拼接成一个一维向量（长度 = Patch Size × 每帧特征维度），再通过一个 MLP（线性投影）映射到模型内部的 嵌入维度 \$D\$。这一步得到的向量就相当于 Token。
+
+
+
+
+Transformer 编码把所有 Token 按顺序送进 decoder‑only Transformer。Transformer 通过自注意力把每个 Token 与其它 Token 进行信息交互，最终为每个 Patch 生成一个上下文表示 \$hᵢ\$。其中 \$hₙ\$（即最后一个已知 Patch 的表示）已经融合了前面 N‑1 个 Patch 的全部信息。
+
+
+TimeFlow（流匹配）生成以 \$hₙ\$ 作为条件，结合一个从标准高斯分布采样的随机噪声，使用 FM‑Net（流匹配网络）进行 \$K\$ 步的迭代推理。每一步都会把噪声稍微“推向”目标分布，完成后得到的向量就是 下一个 Patch 的预测。因为噪声是随机的，你可以多次采样得到多条可能的未来序列，从而估计不确定性。
+
+
+所以，整体上可以把它看成：
+
+原始序列 → Patch 切分 → MLP 嵌入 → Transformer 自注意力 → 最后一个 Token 的嵌入 \$hₙ\$ → FM‑Net 生成下一个 Patch。
+
+
+研究故事
+冲突（Problem）
+传统的时间序列模型往往先把连续数值离散成字符或标签，再用语言模型的交叉熵进行训练。离散化导致信息丢失、模式崩塌，且只能给出单一的点预测，难以表达不确定性。
+转折（Motivation）
+生成式大模型（如 VLA）已经证明，在原始连续空间直接建模 能产生更丰富的输出。Sundial 把这一思路搬到时间序列上，提出 TimeFlow Loss，让 Transformer 在每个 patch 上学习完整的概率分布，而不是单一的 token。
+方案（Method）
+
+
+Patch 划分：把序列按固定长度（如 30 帧）切成若干块，每块保持原始数值。
+
+
+Patch‑Embed（MLP）：把每个 patch 拼成 30 · N 维向量，线性投影到统一的嵌入维度 D（512/768/1024）。
+
+
+Transformer 编码：使用 RoPE、Pre‑LN、FlashAttention、KV Cache 等增强，使所有 token 并行交互，得到每个 patch 的上下文表示 hᵢ。
+
+
+TimeFlow（Flow‑Matching）：以最后一个 token 的表示 hₙ 为条件，结合随机噪声通过 FM‑Net 进行 K 步迭代，直接生成下一个 patch 的概率分布。多次采样即可得到多样化的预测和不确定性区间。
+
+
+形象比喻
+把时间序列看成一段连续的音乐。传统方法像是把每个音符先转成离散的符号，再让模型记忆这些符号；Sundial 则把原始的波形切成小段（patch），每段直接喂给模型，让它在完整的声波上学习“音色”。随后，模型像即兴演奏一样，从已有的乐句（hₙ）出发，随机生成多种可能的后续段落。
+隐藏的代价（The Catch）
+
+
+大规模预训练：需要 万亿级 时间点和多张 A100 GPU，普通实验室难以直接复现。
+
+
+对帧维度的统一要求：所有输入必须在同一批次里保持相同的特征维度，需要额外的线性投影或填充。
+
+
+高频数据仍有挑战：论文主要在中低频序列上评估，极高采样率的细节可能未被充分捕获。
+
+
+快速要点（Quick Takeaways）
+
+
+原生连续建模：不做离散化，直接在原始数值上学习。
+
+
+Patch‑Transformer‑Flow：三段式流水线实现高效并行与生成式预测。
+
+
+显著提升：在多项零样本基准（TSLib、GIFT‑Eval、FEV）上实现 SOTA，且提供多样化不确定性估计。
+
+
+},
+	file = {Preprint PDF:/Users/rogers/Zotero/storage/6EGI7YYT/Liu 等 - 2025 - Sundial A Family of Highly Capable Time Series Foundation Models.pdf:application/pdf;Snapshot:/Users/rogers/Zotero/storage/WHYIDQVZ/2502.html:text/html},
+}
+
+@misc{qiu_adapt_2026,
+	title = {Adapt {Data} to {Model}: {Adaptive} {Transformation} {Optimization} for {Domain}-shared {Time} {Series} {Foundation} {Models}},
+	shorttitle = {Adapt {Data} to {Model}},
+	url = {https://arxiv.org/abs/2603.00629v1},
+	abstract = {Large time series models (LTMs) have emerged as powerful tools for universal forecasting, yet they often struggle with the inherent diversity and nonstationarity of real-world time series data, leading to an unsatisfactory trade-off between forecasting accuracy and generalization. Rather than continually finetuning new LTM instances for each domain, we propose a data-centric framework, time-series adaptive transformation optimization (TATO), that enables a single frozen pre-trained LTM to adapt to diverse downstream domains through an optimally configured transformation pipeline. Specifically, TATO constructs three representative types of transformations, including context slicing, scale normalization, and outlier correction, to help LTMs better align with target domain characteristics. To ensure robustness, we incorporate carefully selected time series augmentations and a two-stage ranking mechanism that filters out pipelines underperforming on specific metrics. Extensive experiments on state-of-the-art LTMs and widely used datasets demonstrate that TATO consistently and significantly improves domain-adaptive forecasting performance, achieving a maximum reduction in MSE of 65.4{\textbackslash}\% and an average reduction of 13.6{\textbackslash}\%. Moreover, TATO is highly efficient, typically completing optimization in under 2 minutes, making it practical for real-world deployment. The source code is available at https://github.com/thulab/TATO.},
+	language = {en},
+	urldate = {2026-05-07},
+	journal = {arXiv.org},
+	author = {Qiu, Yunzhong and Cen, Zhiyao and Pei, Zhongyi and Wang, Chen and Wang, Jianmin},
+	month = feb,
+	year = {2026},
+	annote = {\_时序-冻结模型数据-仅预处理优化：
+文章核心是使用一系列固定顺序的数据预处理方法的超参数组合优化替代针对每一个领域的数据的专门Embedding/Learned-Adapter。将原本的超多参数优化简化为了几个超参数的优化问题，效果很好的同时计算量和所需的数据大幅度减少。
+具体的方法是得到一个方案（参数组）-{\textgreater}在多个指标上评价-{\textgreater}选取Pareto Front-{\textgreater}在Pareto Front里选取认为最好的（基于偏好）。
+这里选取候选方案的方法是TPE贝叶斯优化。算法基于已有信息进行概率密度估计，然后迭代。一般需要500个Trial才能得到合适的方案\$h{\textasciicircum}*\$.
+
+这里简单介绍Pareto：
+帕累托最优（Pareto Optimality）也就是不被任何人支配的解集合。支配：简单来说，就像是向量里每一个元素\$e\_A\$都大于等于\$e\_B\$而且同时至少存在一个\$e\_\{A,i\} {\textgreater} e\_\{B,j\}\$.这里每一个元素就是一个评价指标。
+若一个方案\$h{\textasciicircum}*\$不被任何其他任意方案\$h\_i\$支配，则他是一个Pareto最优解，属于Pareto Front。也就是：将这些最优解在几何空间中连接起来，就形成了帕累托前沿（Pareto Front）。
+Pareto Front 代表了当前问题下性能的极限边界。站在帕累托前沿上，意味着系统潜力已被榨干，任何想要进一步提升某一个指标的行为，都必然要以牺牲其他指标为代价。这正是多目标优化中经典的权衡（Trade-off）关系——没有绝对的“最好”，只有在不同指标间做出的“最佳妥协”。
+结合我们的笔记背景，TPE 贝叶斯优化算法经过约 500 次 Trial 的迭代，最终收敛并筛选出的正是这样一组帕累托最优的超参数组合。这一步相当于客观地绘制出了一张“最优权衡地图”，剔除了所有低效的参数方案。随后，我们就可以根据实际业务对各个指标的具体偏好（例如更看重推理速度还是更看重精度），在这张帕累托前沿地图上精准地选取那个最适合当前场景的最终方案\$h\_\{opti\}\$ 。
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/TM6IWRK9/Qiu 等 - 2026 - Adapt Data to Model Adaptive Transformation Optimization for Domain-shared Time Series Foundation M.pdf:application/pdf},
+}
+
+@misc{qiao_its_2026,
+	title = {It's {TIME}: {Towards} the {Next} {Generation} of {Time} {Series} {Forecasting} {Benchmarks}},
+	shorttitle = {It's {TIME}},
+	url = {https://arxiv.org/abs/2602.12147v3},
+	abstract = {Time series foundation models (TSFMs) are revolutionizing the forecasting landscape from specific dataset modeling to generalizable task evaluation. However, we contend that existing benchmarks exhibit common limitations in four dimensions: constrained data composition dominated by reused legacy sources, compromised data integrity lacking rigorous quality assurance, misaligned task formulations detached from real-world contexts, and rigid analysis perspectives that obscure generalizable insights. To bridge these gaps, we introduce TIME, a next-generation task-centric benchmark comprising 50 fresh datasets and 98 forecasting tasks, tailored for strict zero-shot TSFM evaluation free from data leakage. Integrating large language models and human expertise, we establish a rigorous human-in-the-loop benchmark construction pipeline to ensure high data integrity and redefine task formulation by aligning forecasting configurations with real-world operational requirements and variate predictability. Furthermore, we propose a novel pattern-level evaluation perspective that moves beyond traditional dataset-level evaluations based on static meta labels. By leveraging structural time series features to characterize intrinsic temporal properties, this approach offers generalizable insights into model capabilities across diverse patterns. We evaluate 12 representative TSFMs and establish a multi-granular leaderboard to facilitate in-depth analysis and visualized inspection. The leaderboard is available at https://huggingface.co/spaces/Real-TSF/TIME-leaderboard.},
+	language = {en},
+	urldate = {2026-05-07},
+	journal = {arXiv.org},
+	author = {Qiao, Zhongzheng and Pan, Sheng and Wang, Anni and Zhukova, Viktoriya and Liu, Yong and Jiang, Xudong and Wen, Qingsong and Long, Mingsheng and Jin, Ming and Liu, Chenghao},
+	month = feb,
+	year = {2026},
+	annote = {\_时序-基于时序特征的TSFM新Bench：
+1 Intro
+现在的时间序列预测基准（TSF Bench）主要存在四个问题：
+
+
+数据来源受限且易泄漏：很多基准仍旧使用旧有的、已经被大模型预训练数据所覆盖的老数据集，导致模型在评测时可能出现“数据泄漏”，进而夸大了性能提升。
+
+
+数据质量不足：数据的质量检查往往不够严格，常会出现极端异常值、缺失值过多或噪声过大的变量，影响评测的可靠性。
+
+
+任务设置与实际需求脱节：基准往往采用固定的预测窗口和频率，缺乏对真实业务场景的考虑，导致模型在实验中表现好，却不一定适用于实际应用。
+
+
+分析视角过于粗糙：评测只按数据集的领域或采样频率进行划分并给出整体平均分，忽略了不同序列之间在趋势、季节性等结构特征上的相似性，难以解释模型为何在某些情况下表现更好，也不利于用户根据具体需求选模型。
+
+
+其中最大的问题是4: 按照业务而不是内在结构性联系进行划分。
+
+观点：结构性是数据非常重要的特征。机器人数据，金融或者其他领域数据具有各自显著的数据特征，如何利用这些数据特征进行学习可以说是模型架构设计的最大重点，因此这才是所谓不同“领域”的根本。
+
+2.2 Time Series Features
+tsfeature是时序特征，也是作者主张的时序分类的核心根本。
+补充一个关键问题：传统的基准往往只在数据集层面 进行特征划分——把整个数据集看作一个整体，统计它的整体趋势、季节性强度、复杂度等，然后用这些宏观指标来评估模型。这样做虽然能给出一个大致的概览，却会掩盖同一业务场景内部的细微差异。
+在实际的时间序列中，即使它们来源于同一个领域（比如电力负荷、零售销量或气象监测），每条序列的内部结构也可能大相径庭。作者通过 STL 分解 把每条序列拆解成趋势、季节性和残差，并提取出七个结构化特征。随后，用二进制阈值（大于中位数记 1、否则记 0）为每条序列生成一个 模式向量，相同向量的序列被归入同一 cluster。
+6.3 Pattern‑specific Performance（模式层级表现）
+本小节的核心在于 把时间序列按结构化特征（tsfeatures）划分为若干二元模式，并在每一种模式下分别统计 12 种 Time‑Series Foundation Models（TSFMs）的预测误差（MASE、CRPS），从而观察模型在不同时间‑特性上的相对优势与劣势。
+1.选取的特征（六个结构化特征）
+
+
+
+
+编号
+
+
+特征
+
+
+含义
+
+
+
+
+F₁
+
+
+Trend Strength
+
+
+趋势占整体波动的比例
+
+
+
+
+F₂
+
+
+Trend Linearity
+
+
+趋势的线性程度
+
+
+
+
+F₃
+
+
+Seasonality Strength
+
+
+季节性成分的强度
+
+
+
+
+F₄
+
+
+Seasonality Correlation
+
+
+不同季节周期之间的相似度
+
+
+
+
+F₅
+
+
+Residual ACF‑1
+
+
+残差的一阶自相关（残差是否仍有结构）
+
+
+
+
+F₆
+
+
+Complexity（谱熵）
+
+
+序列的混乱程度、预测难度
+
+
+
+
+F₇
+
+
+Stationarity（二元）
+
+
+是否平稳（ADF 检验）
+
+
+
+
+每个特征都与全体序列的中位数比较，超过中位记为 1，否则记为 0，形成 7‑位二进制码；相同码的序列被归为同一 pattern。
+2. 评估方式
+
+
+
+
+对每个 pattern，先检索所有符合该二进制码的 variates。
+
+
+对每个模型，计算这些 variates 的 MASE 与 CRPS（均值），再 相对 S‑Naive 基准 进行归一化（{\textless}1 表示优于基准）。
+
+
+采用 几何平均 进行跨任务聚合，得到 Normalized MASE / CRPS。
+
+
+
+
+3. 关键发现（图 5、6、表 5）
+
+
+
+
+特征
+
+
+主要趋势
+
+
+说明
+
+
+
+
+Trend Strength (\$F₁\$)
+
+
+强趋势序列上模型相对基准的提升更明显（红点 {\textgreater} 蓝点）
+
+
+趋势信号对模型有帮助，所有模型均受益
+
+
+
+
+Trend Linearity (\$F₂\$)
+
+
+类似 \$F₁\$，线性趋势更易被捕获
+
+
+线性趋势是模型的“强信号”
+
+
+
+
+Seasonality Strength (\$F₃\$)
+
+
+弱季节性时模型差距小；强季节性时差距扩大
+
+
+复杂季节模式能够区分出更强的模型
+
+
+
+
+Seasonality Correlation (\$F₄\$)
+
+
+稳定季节（高相关）让模型表现更好；不稳定季节差距更大
+
+
+季节形状的可重复性是关键
+
+
+
+
+Residual ACF‑1 (\$F₅\$)
+
+
+残差仍有自相关时模型提升更明显
+
+
+说明模型能够捕捉到残差中的线性结构
+
+
+
+
+Complexity (\$F₆\$)
+
+
+高复杂度（大谱熵）时模型之间差异被压缩（几乎同分）低复杂度时优秀模型显著领先
+
+
+高复杂度相当于“性能均衡器”，低复杂度则放大模型能力差异
+
+
+
+
+Stationarity (\$F₇\$)
+
+
+非平稳序列上模型相对基准的提升更大
+
+
+模型在处理趋势/季节性变化时更有优势
+
+
+
+
+
+
+整体趋势：随着模型迭代（如 TimesFM‑2.5、Chronos‑2、TiRex 等），所有趋势相关模式的相对提升基本保持一致，说明模型整体进步并不依赖于趋势强度。
+
+
+季节性：强季节性是区分模型的关键因素；弱季节性时模型表现相近。
+
+
+复杂度：高复杂度序列对所有模型都是难点，几乎没有模型能显著超越 S‑Naive；低复杂度序列则能显著体现模型之间的差距，最先进的模型在这类序列上表现尤为突出。
+
+
+4. 结论与意义
+
+
+模式层级评估 能够揭示 “在什么样的时间结构上模型表现好/差”，而不是仅给出整体平均分。
+
+
+趋势 与 季节性 是模型提升的主要驱动，但 复杂度（谱熵）是最具区分度的特征——它可以把模型的能力压缩到几乎相同，或放大到明显差异。
+
+
+对于实际业务：
+
+
+若数据拥有 强趋势或强季节性，大多数现代 TSFM 已经能充分利用这些信号。
+
+
+若数据 复杂度高（噪声多、频谱分布宽），当前模型仍然难以取得显著进步，需要进一步的算法创新。
+
+
+若数据 低复杂度且结构化，选用最新的 TSFM（如 TiRex、Chronos‑2）可以获得显著收益.
+
+
+
+
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/U35G32RC/Qiao 等 - 2026 - It's TIME Towards the Next Generation of Time Series Forecasting Benchmarks.pdf:application/pdf},
+}
+
+@misc{liang_foundation_2024,
+	title = {Foundation {Models} for {Time} {Series} {Analysis}: {A} {Tutorial} and {Survey}},
+	shorttitle = {Foundation {Models} for {Time} {Series} {Analysis}},
+	url = {https://arxiv.org/abs/2403.14735v3},
+	doi = {10.1145/3637528.3671451},
+	abstract = {Time series analysis stands as a focal point within the data mining community, serving as a cornerstone for extracting valuable insights crucial to a myriad of real-world applications. Recent advances in Foundation Models (FMs) have fundamentally reshaped the paradigm of model design for time series analysis, boosting various downstream tasks in practice. These innovative approaches often leverage pre-trained or fine-tuned FMs to harness generalized knowledge tailored for time series analysis. This survey aims to furnish a comprehensive and up-to-date overview of FMs for time series analysis. While prior surveys have predominantly focused on either application or pipeline aspects of FMs in time series analysis, they have often lacked an in-depth understanding of the underlying mechanisms that elucidate why and how FMs benefit time series analysis. To address this gap, our survey adopts a methodology-centric classification, delineating various pivotal elements of time-series FMs, including model architectures, pre-training techniques, adaptation methods, and data modalities. Overall, this survey serves to consolidate the latest advancements in FMs pertinent to time series analysis, accentuating their theoretical underpinnings, recent strides in development, and avenues for future exploration.},
+	language = {en},
+	urldate = {2026-05-07},
+	journal = {arXiv.org},
+	author = {Liang, Yuxuan and Wen, Haomin and Nie, Yuqi and Jiang, Yushan and Jin, Ming and Song, Dongjin and Pan, Shirui and Wen, Qingsong},
+	month = mar,
+	year = {2024},
+	doi = {10.1145/3637528.3671451},
+	annote = {\_KDD综述-时序基础模型：
+总体来说提供的信息和文章质量都不如TPAMI的那一篇，只做简单了解。
+2. 背景
+基础模型：相关概念。
+
+
+模态，也就是数据的形式，趋势是多模态。
+
+
+架构，也就是处理数据的方式，重点是Trans和SSM。
+
+
+预训练。
+
+
+适应方法：后训练，etc。
+
+
+1. 时间序列数据类型分类表
+这部分定义了 TSFM 研究的“原材料”。
+
+
+
+
+类别
+
+
+数学表示/核心组成
+
+
+关键特征
+
+
+典型应用场景
+
+
+
+
+标准时序
+
+
+\${\textbackslash}mathbf\{X\} {\textbackslash}in {\textbackslash}mathbb\{R\}{\textasciicircum}\{T {\textbackslash}times D\}\$
+
+
+强调顺序性与时间依赖性，是分析的核心。
+
+
+电力预测、气象监测、金融指标。
+
+
+
+
+空间时序
+
+
+\${\textbackslash}mathcal\{X\} {\textbackslash}in {\textbackslash}mathbb\{R\}{\textasciicircum}\{N {\textbackslash}times T {\textbackslash}times D\}\$
+
+
+引入空间相关性（图结构或均匀栅格）。
+
+
+城市计算、交通流控制、空气质量分布。
+
+
+
+
+轨迹数据
+
+
+\${\textbackslash}mathcal\{T\} {\textbackslash}in {\textbackslash}mathbb\{R\}{\textasciicircum}\{T {\textbackslash}times 2\}\$
+
+
+描述物体在地理空间中的移动过程。
+
+
+车辆导航、动物迁徙轨迹。
+
+
+
+
+事件序列
+
+
+\${\textbackslash}mathcal\{E\} = {\textbackslash}\{(e\_1, t\_1), ...{\textbackslash}\}\$
+
+
+非等间距发生的特定离散动作。
+
+
+用户点击流、系统故障日志。
+
+
+
+
+
+2. TSFM 架构与预训练方法表
+这部分涵盖了从方法论角度对基础模型的分类。
+
+
+
+
+维度
+
+
+子类
+
+
+核心机制与作用
+
+
+
+
+模型架构
+
+
+Transformer-based
+
+
+利用自注意力机制捕捉长程依赖关系。
+
+
+
+
+
+
+
+Non-Transformer
+
+
+多样化架构，旨在高效处理特定的时间模式。
+
+
+
+
+
+
+
+Diffusion-based
+
+
+采用随机过程对数据生成过程建模，提供创新方案。
+
+
+
+
+预训练技术
+
+
+完全监督
+
+
+利用有标签数据进行针对性训练。
+
+
+
+
+
+
+
+自监督 (Self-supervised)
+
+
+涵盖对比学习、生成式及混合式，是 FM 在无标签情况下的主流。
+
+
+
+
+
+3. TSFM 适应与应用技术表
+这部分描述了模型预训练完成后，如何定制化应用于具体任务。
+
+
+
+
+技术手段
+
+
+描述
+
+
+目的
+
+
+
+
+零试学习 (Zero-shot)
+
+
+不针对新任务训练，直接应用模型。
+
+
+验证模型的泛化能力。
+
+
+
+
+提示工程 (Prompting)
+
+
+通过输入特定的上下文或指令引导模型。
+
+
+无需微调即可改变模型输出方向。
+
+
+
+
+分词与分块 (Patching)
+
+
+将序列转化为离散 Token 或小块。
+
+
+降低计算复杂度，捕捉局部特征。
+
+
+
+
+微调 (Fine-tuning)
+
+
+在特定任务数据上调整模型参数。
+
+
+实现特定领域的高精度适配。
+
+
+
+
+
+4.1 标准时间序列
+趋势：跨领域的基础模型，需要跨领域的大规模数据集。
+4.2 空间时间序列
+时空图和时空栅格，但是这样的数据非常少而且跨领域很难融合。
+4.3 其他
+5.1 模型
+
+TSFM（时序标准建模框架）的核心进步，在于它不再把“时间序列”当作孤立的一维信号，而是通过 Transformer 的注意力机制，将数据的“结构”（空间依赖、任务语义、多模态对齐）显式编码为可学习的上下文关系——这本质上是一种“数据增强的范式升级”：从喂原始数据 → 喂结构化数据。
+
+
+
+
+
+原文线索
+
+
+对“更好数据”的启示
+
+
+
+
+图4(a) Transformer-based：Q/K/V 来自同一序列不同部分
+
+
+→ 数据内部存在自依赖结构（如长程周期性、局部突变），Transformer 能自动挖掘，无需人工特征工程 → 好数据 = 保留原始时序完整性 + 允许模型自发现结构
+
+
+
+
+图4(b) Non-Transformer-based（如RNN/MLP）
+
+
+→ 传统方法被迫对数据做强假设（如马尔可夫性、平稳性），导致信息损失 → 说明：旧模型限制了数据价值释放
+
+
+
+
+图4(c) Diffusion-based
+
+
+→ 当真实数据稀疏/有偏时，用扩散模型生成符合物理约束的合成轨迹（如GTM分离轨迹特征→重采样→重建），本质是用生成能力扩充高质量数据集
+
+
+
+
+5.1.1 强调注意力函数 Attention(Q,K,V) 中 Q/K/V 可来自不同模态/尺度
+
+
+→ “更好数据” = 多源异构信号的对齐表示：例如：Q=语言指令，K=历史轨迹，V=当前视觉 → 模型学会在“任务意图-历史行为-实时感知”之间建立映射
+
+
+
+
+提到 TSFM 用于轨迹、医疗、CV、语音等
+
+
+→ 证明：统一架构能泛化，是因为它把不同领域数据“重铸”为同一种结构化表示（即：所有时序都可视为“带位置编码的token序列+关系图”）
+
+
+
+
+5.2 s适应方法：
+
+
+
+
+技术类型
+
+
+图中示意
+
+
+本质含义
+
+
+关键突破点
+
+
+
+
+(a) Direct use（直接使用 / zero-shot）
+
+
+TSFM → Forecast/Impute/Detect 直连
+
+
+模型已内化通用时序知识，无需任何调整即可泛化
+
+
+依赖预训练质量极高；适用于分布偏移小的任务（如同类交通流预测）
+
+
+
+
+(b) Tuning-based（微调）
+
+
+TSFM + Fine-tune → 任务头
+
+
+用目标数据更新全部或部分参数
+
+
+简单有效，但易过拟合、灾难性遗忘；需足够数据
+
+
+
+
+(c) Prompting-based（提示工程）
+
+
+TSFM + Prompt Engineering → Inference
+
+
+冻结模型，仅通过输入提示（如文本指令、可学习向量）引导行为
+
+
+低计算成本、高灵活性；实现“一个模型多任务”；是大模型时代的核心适配方式
+
+
+
+
+(d) Tokenization-based（分词化适配）
+
+
+TSFM/LLM + Token + Prompting
+
+
+将时间序列视为“语言”，用LLM的token机制统一处理
+
+
+实现跨模态对齐：时间序列 ↔ 文本 ↔ 图像；为多模态融合铺路
+
+
+
+
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/3PGQKQI9/Liang 等 - 2024 - Foundation Models for Time Series Analysis A Tutorial and Survey.pdf:application/pdf},
+}
+
+@misc{wang_deep_2026,
+	title = {Deep {Time} {Series} {Models}: {A} {Comprehensive} {Survey} and {Benchmark}},
+	shorttitle = {Deep {Time} {Series} {Models}},
+	url = {http://arxiv.org/abs/2407.13278},
+	doi = {10.48550/arXiv.2407.13278},
+	abstract = {Time series, characterized by a sequence of data points organized in a discrete-time order, are ubiquitous in real-world scenarios. Unlike other data modalities, time series present unique challenges in learning and modeling due to their intricate and dynamic nature, including the entanglement of nonlinear patterns and time-variant trends. Recent years have witnessed remarkable breakthroughs in time series analysis, with techniques shifting from traditional statistical methods to contemporary deep learning models. In this paper, we delve into the design of deep time series models across various analysis tasks and review the existing literature from two perspectives: basic modules and model architectures. Further, we develop and release Time Series Library (TSLib) as a fair benchmark of deep time series models for diverse analysis tasks. TSLib implements 41 prominent models, including both small- and large-scale time series models, covers 30 datasets from different domains, and supports 5 prevalent analysis tasks. Based on TSLib, we evaluate 16 popular deep time series models and 6 advanced time series foundation models. Empirical findings indicate that models with specific structures are apt only at distinct analytical tasks, providing insights for research and adoption of deep time series models. Code and datasets are available at https://github.com/thuml/Time-Series-Library.},
+	urldate = {2026-05-07},
+	publisher = {arXiv},
+	author = {Wang, Yuxuan and Wu, Haixu and Dong, Jiaxiang and Liu, Yong and Wang, Chen and Long, Mingsheng and Wang, Jianmin},
+	month = may,
+	year = {2026},
+	note = {arXiv:2407.13278 [cs]},
+	keywords = {Computer Science - Machine Learning},
+	annote = {\_TPAMI综述-时序方法:
+这个文章主要介绍时序模型，不一定是基础模型，用来了解时序的一些基础方法。
+2.1 时间序列初步研究
+一些基础方法：- ARIMA。 - VAR。
+2.2 时间序列分析任务
+时序问题在机器学习的四个基础任务是1. 预测 2. 异常检测 3. 修补 4. 分类。显然，预测是最难的任务。
+3. 基础模块
+3.1 固定化
+平稳性：归一化。和BN类似，但是BN是针对群体，而平稳性归一化（时序归一化）是针对数据的分布（均值 \${\textbackslash}mu\$ 和方差 \${\textbackslash}sigma\$ ）全部线性变换到一个固定区间，剥离量纲只学分布。
+3.2 分解：
+3.2.1 季节性趋势分解
+最简单的两层分解，实际上是信号经过低通滤波，分别建模高低频。但是没有任何办法区分噪声和高频。
+3.2.2 基扩展
+实际上很像是FFT或者泰勒级数。假设信号是由多个基函数组合成的。这看起来和ResNet的残差处理很像，但是和ResNet不一样，ResNet是进行来回修改（来回残差修改，像是一笔一笔越来越精细）而N-BEATS是成分分解（基函数组合）。对N-BEATS最后输出的是所有层输出的和。N-BEATS的核心是每一层要做两个任务1. Claim：认领自己处理了哪一部分让下一层不再处理这一部分。2. Pridict：将当前所有没有被认领的部分进行处理，输出一个预测值，作为这一层的分量。在N-BEATS基础上有一些进一步的修改：
+
+
+
+
+模型
+
+
+它在 N-BEATS 基础上多考虑了什么？
+
+
+对应的科研直觉
+
+
+
+
+N-HiTS
+
+
+分辨率（不同的项需要不同的网格精度）。
+
+
+减少计算量的同时，实现天然的频域解耦。
+
+
+
+
+DEPTS
+
+
+因果状态（观测值的波动背后有隐藏的物理状态）。
+
+
+增强了对强周期物理过程的解释力。
+
+
+
+
+DEWP
+
+
+系统耦合（除了时间，变量之间也在互相认领）。
+
+
+真正处理复杂的机器人多关节/多传感器系统。
+
+
+
+
+3.2.3 矩阵分解 (Matrix Factorization)
+空间的“去粗取精”。核心直觉： 如果说级数展开是在时间轴上拆解成分，那么矩阵分解就是在空间（维度）轴上挤掉水分。对于多传感器系统，虽然观测维度高，但背后驱动系统的“灵魂变量”往往只有几个。本质上，是在寻找背后的根本原因，也就是所谓的低秩表征。
+数学表达： \$X≈F {\textbackslash}hat X\$
+
+
+\$F\$∈\$R{\textasciicircum}\{k×C\}\$ (因子载荷/载荷矩阵)：描述空间映射，决定了抽象模式如何分配到具体的传感器上。
+
+
+\${\textbackslash}hat X\$ ∈\$R{\textasciicircum}\{T×k\}\$ (潜因子/隐变量)：描述时间演化，捕捉系统最本质的几种动力学模式。
+
+
+物理意义： 认为高维数据 \$X\$ 是由低维潜空间 \${\textbackslash}hat X\$ 通过线性（或非线性）组合生成的。这是一种非学习或半学习的快速表征手段。实际上只是一个LowRank Approximation。
+
+
+单纯的矩阵分解不考虑时间顺序，现代方法（如 TRMF/DeepGLO）引入了时间正则化并且使用了基于学习的表征方法：
+
+
+时间依赖约束： 强制要求拆出来的潜因子 \${\textbackslash}hat X\$ 必须符合某种物理演化逻辑（如符合自回归方程 AR Eq、LSTM 或 TCN 的描述）。
+
+
+空间依赖约束： 利用图拉普拉斯 (Graph Laplacian) 等正则项，引入传感器在物理拓扑结构上的关联（如机器人左臂传感器与右臂传感器的物理距离）。
+
+
+实际上这相当于给表征的优化目标函数增加了其他的重要优化项目，可以粗略的形式化为：
+\$L\_\{total\} = {\textbackslash}lambda\_1 {\textbackslash}underbrace\{{\textbackslash}{\textbar}{\textbackslash}mathbf\{X\} - {\textbackslash}text\{Dec\}(z){\textbackslash}{\textbar}{\textasciicircum}2\}\_\{{\textbackslash}text\{重建约束\}\} + {\textbackslash}lambda\_2 {\textbackslash}underbrace\{{\textbackslash}{\textbar}z\_t - {\textbackslash}text\{Trans\}(z\_\{t-1\}){\textbackslash}{\textbar}{\textasciicircum}2\}\_\{{\textbackslash}text\{演化一致性\}\} + {\textbackslash}lambda\_3 {\textbackslash}underbrace\{{\textbackslash}Omega(z)\}\_\{{\textbackslash}text\{物理/稀疏约束\}\}\$
+
+
+
+
+模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+适用场景
+
+
+
+
+TRMF
+
+
+矩阵分解 + 自回归 (AR) 正则
+
+
+演化连续性：潜因子必须能被自己过去的状态预测。
+
+
+线性动力学明显的系统
+
+
+
+
+NoTMF
+
+
+向量自回归 (VAR) + 差分操作
+
+
+捕捉非平稳：在低秩空间直接处理趋势和季节性。
+
+
+具有明显漂移的现实数据
+
+
+
+
+DeepGLO
+
+
+TCN (时间卷积) 全局/局部模型
+
+
+非线性建模：利用神经网络捕获比 AR 更复杂的非线性依赖。
+
+
+复杂、高动态的物理过程
+
+
+
+
+BTF
+
+
+全贝叶斯框架
+
+
+不确定性建模：将分解与预测统一在概率图模型中。
+
+
+数据缺失严重、需概率估计
+
+
+
+
+LSTM-GL-ReMF
+
+
+LSTM + 图拉普拉斯正则
+
+
+拓扑觉察：结合长短期记忆与物理结构的拓扑关系。
+
+
+具有强物理结构（如电网/机器人）
+
+
+
+
+3.3.1 频域表示 (Frequency Domain Representation)
+核心直觉： FFT作为工具，但是还是时域回归。将 FFT 作为一种高级的特征提取工具或预处理手段，利用频率的稀疏性来辅助模型在时域更好地识别长短期关系，但预测的本质仍然是在时间维度上进行。
+
+
+空间重塑 (Reshape)： 利用 FFT 找到信号的主导周期，将 1D 序列折叠为 2D 图像（TimesNet），利用 2D 卷积同时处理周期内和周期外的变化。
+
+
+
+
+低通滤波 (LPF)： 认为噪声隐藏在高频中，通过切掉高频来压缩模型并增强鲁棒性（FITS）。
+
+
+
+
+
+
+模型
+
+
+它在频域基础上多考虑了什么？
+
+
+对应的科研直觉
+
+
+
+
+TimesNet
+
+
+多周期 2D 变换：将频率转化为图像纹理。
+
+
+维度跃迁：把抽象的频率耦合变成直观的图像特征，用 CNN 降维打击。
+
+
+
+
+FEDformer
+
+
+随机频率采样：不只看低频，也保留部分高频波动。
+
+
+全景视角：防止过度平滑导致物理细节丢失。
+
+
+
+
+FiLM / FITS
+
+
+频谱压缩：利用低秩近似或截断频率来减少参数。
+
+
+物理降噪：认为核心规律是稀疏的，高频往往代表传感器干扰。
+
+
+
+
+Autoformer
+
+
+频域自相关：利用 Wiener-Khinchin 定理加速计算。
+
+
+效率突围：利用频域乘法代替时域卷积，实现 \$O(L {\textbackslash}log L)\$  计算。
+
+
+
+
+
+3.3.2 频域建模 (Frequency Domain Modeling)
+核心直觉： 直接在频域干比在时域强。认为时域数据过于混沌且计算冗余，直接将预测任务搬到频谱空间（复数域）进行。模型学习的是“频率分量如何演化”，最后一次性映射回时域。
+
+
+复数映射： 直接在复数域（实部+虚部）上运行 MLP 或算子，利用相位（Phase）保持时间的先后顺序。
+
+
+算子替代： 用频域的逐点乘法（滤波器）取代时域的注意力机制，从而获得全局感受野。
+
+
+
+
+
+
+模型
+
+
+它在频域基础上多考虑了什么？
+
+
+对应的科研直觉
+
+
+
+
+FreTS
+
+
+复数域特征提取：专为复数设计的 MLP 同时处理振幅和相位。
+
+
+全息建模：利用相位直接编码时间顺序，实现非局部信息交互。
+
+
+
+
+StemGNN
+
+
+图傅里叶变换 (GFT)：在物理拓扑结构上做频域变换。
+
+
+拓扑觉察：识别物理实体（如多关节）之间的同步规律。
+
+
+
+
+TSLANet
+
+
+自适应频谱块 (ASB)：用频域滤波器取代 Transformer 注意力。
+
+
+全局算子：频域的一个点就是全局，用极低开销实现长程依赖捕捉。
+
+
+
+
+FourierDiffusion
+
+
+频域扩散过程：在频谱空间进行 SDE（随机微分方程）求解。
+
+
+高保真生成：确保生成的轨迹在能量分布和振动频率上符合物理逻辑。
+
+
+
+
+4. 模型架构
+4.1 MLP
+这一节的核心逻辑在于：在追求极致性能的道路上，回归最简单的线性依赖往往比追求复杂的非线性堆叠更有效。
+核心直觉： “大道至简”。虽然神经网络本质上是非线性的，但在时序建模中，通过强制线性化或残差解耦，MLP 能够比复杂的 Transformer 提供更稳定的演化预测。
+
+
+级数展开 (Series Decomposition)： 将复杂信号视为趋势项（线性/多项式）和季节项（正弦/余弦）的级数累加。
+
+
+线性回归 (Linear Logic)： 证明了对于有强烈惯性的物理数据，简单的线性层（DLinear）在防止过拟合方面具有天然优势。
+
+
+隐空间拉直 (Koopman Embedding)： 利用 MLP 完成复杂的坐标变换，使数据在隐空间里呈现线性演化。
+
+
+
+
+
+
+模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+典型的物理对标
+
+
+
+
+N-BEATS
+
+
+深度堆叠的残差分支 (Backcast/Forecast)
+
+
+级数剥离：每一层认领一种模式并减去残差，像剥洋葱一样提取规律。
+
+
+泰勒展开 / 傅里叶级数
+
+
+
+
+DLinear
+
+
+拆掉激活函数，纯线性回归
+
+
+归纳偏置：承认物理世界的底层是简单的线性惯性，拒绝过度拟合噪声。
+
+
+经典自回归 (AR)
+
+
+
+
+FITS
+
+
+复数线性层 (基于频域插值)
+
+
+低通滤波：认为预测本质是频谱的缩放平移，在频域进行线性操作。
+
+
+信号滤波器
+
+
+
+
+TSMixer
+
+
+时间混合 (Time-mix) + 特征混合 (Feature-mix)
+
+
+解耦观察：将“什么时候发生”和“哪个关节发生”分开进行 MLP 映射。
+
+
+多变量解耦控制
+
+
+
+
+Koopa
+
+
+基于 Koopman 理论的线性演化算子
+
+
+全知视角：寻找一个能让一切复杂非线性运动都变回“走直线”的坐标系。只要观测足够牛逼，一定能找到一个尽善尽美函数让一切都变成线性演化。
+
+
+拉普拉斯妖 / 模态分析
+
+
+
+
+4.2 RNN
+核心直觉： 隐状态。这就是所谓的记忆，模型每到一个地方就记笔记并且修笔记（隐含状态\$h\$），问题是1. 时间依赖不能并行。2. 每一次修改笔记改来改去马上面目全非，走不了多久就全部忘。
+
+
+门控循环 (Gating Mechanism)： 通过复杂的逻辑开关（如 LSTM）来手动筛选哪些信息该留，哪些该忘。
+
+
+线性系统转换 (SSM Expansion)： 放弃复杂的门控，假设底层是一个线性的动力学方程，利用矩阵幂运算实现超长程记忆。
+
+
+选择性扫描 (Selective Scan)： 模仿 FiLM 的思想，让线性系统的参数随输入动态变化，
+
+
+
+
+
+
+模型分类
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+典型的物理对标
+
+
+
+
+LSTNet / DA-RNN
+
+
+卷积提取局部 + 循环提取长期
+
+
+多尺度观察：用 CNN 看瞬时冲击，用 RNN 看趋势波动。
+
+
+周期性机械振动
+
+
+
+
+DeepAR
+
+
+自回归概率预测 (Probabilistic)
+
+
+概率演化：不只预测轨迹，还预测轨迹的“置信区间”。
+
+
+布朗运动 / 随机动力学
+
+
+
+
+S4 / Struct. SSM
+
+
+线性状态空间矩阵 \${\textbackslash}mathbf\{A\}, {\textbackslash}mathbf\{B\}, {\textbackslash}mathbf\{C\}\$
+
+
+线性骨架：假设杂乱的数据背后有一个极简的线性物理模型。
+
+
+线性时不变系统 (LTI)
+
+
+
+
+Mamba
+
+
+时变参数 (Input-dependent) + 关联扫描
+
+
+动态自适应：用硬件级的加速手段，跑通了带“选择性”的线性方程。
+
+
+变增益控制 (Gain Scheduling)
+
+
+
+
+Neural ODEs
+
+
+隐状态导数建模 \${\textbackslash}frac\{dh\}\{dt\} = f\_\{{\textbackslash}theta\}(h, t)\$
+
+
+连续流动：打破离散步长限制，认为演化是平滑、连续的。
+
+
+牛顿力学 / 运动学方程
+
+
+
+
+这里可以重点了解一下Mamba：
+
+
+\${\textbackslash}begin\{cases\} {\textbackslash}dot\{h\}(t) = {\textbackslash}mathbf\{A\}h(t) + {\textbackslash}mathbf\{B\}x(t) {\textbackslash}{\textbackslash} y(t) = {\textbackslash}mathbf\{C\}h(t) {\textbackslash}end\{cases\}\$ \${\textbackslash}to\$ \${\textbackslash}begin\{aligned\} {\textbackslash}overline\{{\textbackslash}mathbf\{A\}\}\_t \&= {\textbackslash}exp({\textbackslash}Delta\_t {\textbackslash}mathbf\{A\}) {\textbackslash}approx {\textbackslash}mathbf\{I\} + {\textbackslash}Delta\_t {\textbackslash}mathbf\{A\} {\textbackslash}{\textbackslash} {\textbackslash}overline\{{\textbackslash}mathbf\{B\}\}\_t \&= ({\textbackslash}Delta\_t {\textbackslash}mathbf\{A\}){\textasciicircum}\{-1\} ({\textbackslash}exp({\textbackslash}Delta\_t {\textbackslash}mathbf\{A\}) - {\textbackslash}mathbf\{I\}) {\textbackslash}cdot {\textbackslash}Delta\_t {\textbackslash}mathbf\{B\} {\textbackslash}approx {\textbackslash}Delta\_t {\textbackslash}mathbf\{B\} {\textbackslash}end\{aligned\}\$  \${\textbackslash}to\$ \$h\_t = {\textbackslash}overline\{{\textbackslash}mathbf\{A\}\}\_t h\_\{t-1\} + {\textbackslash}overline\{{\textbackslash}mathbf\{B\}\}\_t x\_t\$
+
+
+
+
+每一个时刻的\${\textbackslash}mathbf\{B\}, {\textbackslash}mathbf\{C\}, {\textbackslash}mathbf\{D\}\$都是不一样的（但是\${\textbackslash}mathbf\{A\}\$ 一般是不变的，这是一个可学习参数而不是随着当前输入变化的变量，在这里\${\textbackslash}mathbf\{A\}\$代表的是系统隐变量演化的大方向，而其他矩阵还有时间变化\${\textbackslash}Delta\_t\$ 则表示随着时间的变化部分），是根据一个MLP的非线性映射计算出来的，也就是Mamba假设的是每一个“时间步”之内的变化是完全线性的，但是不假设全程都是完全线性的，保留的只有矩阵\${\textbackslash}mathbf\{A\}\$作为演化的基本规律（往往代表记忆的衰减比例等等）。
+
+
+Mamba动态变化的部分是“时间步长”\${\textbackslash}mathbf\{{\textbackslash}Delta\_t\}\$。注意这里的时间是“内化宇宙，隐变量宇宙”的“时间”。也就是现实世界的每一个固定时间间隔之间（比如30Hz的1/30s）对应了“内化宇宙”的多长“时间”。在“内化宇宙”，不仅空间（映射）和现实世界不一致，时间也被假设为不是线性投影的。这样的效果是，Mamba可以认为这一步对应了很小的内化宇宙时间\${\textbackslash}mathbf\{{\textbackslash}Delta\_t\} {\textbackslash}to 0\$ 则隐变量的变化也几乎是0，而如果\${\textbackslash}mathbf\{{\textbackslash}Delta\_t\} = C {\textgreater}{\textgreater} 0\$ 则对应一个较大的隐变量变化。这就是自适应的时间步长。
+
+
+区别于Koopman：Mamba有点像Koopman思想，认为一切都可以表述成一个线性变换的投射，将状态\$h\$变成了一个线性状态演化，然后输出是他的线性投影。但是，区别在于Koopman认为只要找的足够好观测足够多一定有一个维度是线性，而Mamba是一个带有时变调制的LTI系统，基于LTI进行时变非线性调制。
+
+
+4.3 CNN
+核心直觉： 局部性与平移不变性。1. 时间序列的语义信息隐藏在时间变化中。2. 利用滑动窗口捕捉局部趋势，就像在视频中识别动作一样。
+
+
+1D 卷积 (1D CNN): 在时间轴上滑动，识别简单的局部波形。
+
+
+膨胀卷积 (Dilated Conv): 解决“短视”问题，通过跳点连接在不增加参数的情况下扩大感受野。
+
+
+维度转换 (2D Transformation): 认为时序的周期性可以转化为图像的“纹理”，变一维搜索为二维识别。
+
+
+
+
+
+
+模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+典型的物理/数学对标
+
+
+
+
+TCN
+
+
+膨胀卷积 (Dilated) + 因果卷积 (Causal)
+
+
+视野扩张： 像用望远镜一样，通过指数级增大的跳步，让模型能看到极长的历史。
+
+
+因果系统 / 感受野扩张
+
+
+
+
+SCINet
+
+
+分层下采样 + 卷积交互架构
+
+
+多分辨率分析： 将序列不断对半分，分别观察粗粒度和细粒度的动态依赖。
+
+
+多尺度小波分析思路
+
+
+
+
+MICN
+
+
+混合多种不同大小的卷积核
+
+
+局部-全局协同： 同时用大窗口看大势，小窗口看波动，最后聚合信息。
+
+
+多感受野融合
+
+
+
+
+ModernTCN
+
+
+深度可分离卷积 (DWConv) + 卷积前馈网络
+
+
+效率进化： 借鉴现代视觉网络 (ConvNeXt)，解耦时间维度和变量维度，提升大模型性能。
+
+
+轻量化骨干网 (MobileNet/ConvNeXt)
+
+
+
+
+TimesNet
+
+
+基于周期长度将 1D 序列重塑为 2D 张量
+
+
+空间转换： 周期内的变化看作“行”，周期间的变化看作“列”，将时序预测变成图像处理。
+
+
+多周期谐波分析 / 纹理识别
+
+
+
+
+
+这里可以重点了解一下 TimesNet (2D 建模的逻辑)：
+
+
+周期驱动的重塑 (Period-based Reshaping)：
+\${\textbackslash}mathbf\{X\}\_\{2D\}{\textasciicircum}i = {\textbackslash}text\{Reshape\}({\textbackslash}text\{Padding\}({\textbackslash}mathbf\{X\}\_\{1D\}))\$
+它不是乱折叠，而是根据 FFT (快速傅里叶变换) 找到最显著的 \$k\$ 个周期长度。如果周期是 24 小时，它就把序列每 24 个点折成一行。
+
+
+2D 图像化的优势：
+在 2D 矩阵中，垂直方向（列） 上的相邻像素实际上是不同周期中同一时刻的点（比如每天的中午 12 点），这让 CNN 能极其直观地捕捉 “周期间” (Inter-period) 的长期趋势。
+
+
+Inception 块的应用：
+\${\textbackslash}hat\{{\textbackslash}mathbf\{X\}\}\_\{2D\}{\textasciicircum}i = {\textbackslash}text\{Inception\}({\textbackslash}mathbf\{X\}\_\{2D\}{\textasciicircum}i)\$
+因为 1D 序列变成了 2D 图像，就可以直接调用视觉领域最成熟的 Inception 模块，利用不同尺寸的 2D 卷积核同时抓取图像中的各种“纹理特征”。
+
+
+4.4 GNN
+这部分大概只做了粗略了解。核心直觉： 时间序列不只是孤立的一条线。在多变量场景（如交通路网、传感器网络）中，变量之间存在复杂的拓扑关系。GNN 的本质是将“空间拓扑”与“时间演化”耦合在一起。
+
+
+节点 (Nodes)： 每个变量（如一个交通摄像头或一个股票）就是一个节点。
+
+
+边 (Edges)： 变量间的相关性（如地理邻近或业务逻辑）。
+
+
+
+
+
+
+模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+典型的物理/数学对标
+
+
+
+
+DCRNN
+
+
+扩散卷积 + 循环神经网络
+
+
+双向扩散： 模拟交通流在路网上的随机游走，捕捉空间依赖。
+
+
+有向图上的扩散过程
+
+
+
+
+STGCN
+
+
+时空卷积块 (门控卷积 + 图卷积)
+
+
+纯卷积替代： 抛弃慢速的 RNN，完全用卷积处理时空特征，大幅提升速度。
+
+
+时空流形 (Spatiotemporal Manifold)
+
+
+
+
+Graph WaveNet
+
+
+扩散卷积 + 扩张因果卷积 + 自适应邻接矩阵
+
+
+动态发现： 即使不知道地图（邻接矩阵），也能通过数据学习出变量间的潜在联系。
+
+
+自适应控制系统
+
+
+
+
+MTGNN
+
+
+图学习层 + 多层图卷积
+
+
+盲分析： 专门针对没有显式图结构的多变量序列，自动提取隐藏的相关性矩阵。
+
+
+潜在图结构学习
+
+
+
+
+StemGNN
+
+
+结合图傅里叶变换 (GFT) 与 离散波变换 (DFT)
+
+
+频谱建模： 在频域同时处理图间的空间依赖和时间依赖，过滤噪声。
+
+
+谱图理论 (Spectral Graph Theory)
+
+
+
+
+4.5 Transformers
+核心直觉： 语义单位的重构。1. 时间序列的“单个点”往往不具备语义，只有“一段波形”或“整个通道”才有意义。2. 建模粒度的演进本质上是在寻找时序数据中真正的 Token。
+
+
+
+
+建模粒度
+
+
+典型模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+典型的物理/数学对标
+
+
+
+
+点级 (Point-wise)
+
+
+Informer, LogSparse, Pyraformer
+
+
+将每个单独的时间步（Time Step）映射为高维 Embedding 作为一个 Token。
+
+
+精细化对齐： 试图捕捉点与点之间的细微因果，但容易被噪声淹没，且长序列计算极其昂贵（\$O(L{\textasciicircum}2)\$）。
+
+
+单词级 NLP / 采样点对齐
+
+
+
+
+块级 (Patch-wise)
+
+
+PatchTST, Crossformer, Pathformer
+
+
+将一段连续时间窗口（如 16 个点）切成一个 Patch，投影为一个 Token。
+
+
+局部语义增强： 关注一段“小趋势”。类似看图片像素 vs 看物体部件。不仅能提取局部模式，还大幅缩短了输入序列长度。
+
+
+视觉 Token (ViT) / 短时平稳信号
+
+
+
+
+序列级 (Series-wise)
+
+
+iTransformer, TimeXer
+
+
+维度倒置： 将整个变量的 \$L\$ 个点投影为一个 Token。Transformer 在变量维度（Variates）做注意力。
+
+
+反直觉建模： 认为时间维度的规律可以用线性投影解决，而变量间的相关性（如温度影响气压）才是 Transformer 应该处理的核心逻辑。
+
+
+多通道解耦 / 协方差建模
+
+
+
+
+6.1 时间序列预训练
+核心直觉： 迁移学习与通用表示。1. 时序数据虽然看似千差万别（电力、交通、金融），但底层可能共享某些数学模式（如周期、趋势）。2. 通过在海量无标签数据上预训练，模型可以学到一种“通用的时序直觉”，再微调到具体任务上。
+
+
+
+
+预训练范式
+
+
+代表模型/技术
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+
+
+对比学习 (Contrastive Learning)
+
+
+TS2Vec, TF-C, CoST
+
+
+将同一个序列做两次不同的“变换”（比如加噪声、剪切），让模型识别出它们是同一个东西（拉近距离），而与其他序列区分开（拉远距离）。
+
+
+寻找不变性： 就像不管一个人换什么衣服你都能认出他，模型通过对比学到了时序中最稳健的特征。
+
+
+
+
+掩码建模 (Masked Modeling)
+
+
+PatchTST, TST, SimMTM
+
+
+把序列中一部分“挖掉”（Mask），让模型根据上下文把缺失的部分预测/还原出来。
+
+
+理解上下文： 强迫模型理解序列点与点、块与块之间的逻辑关系。能还原出来，说明模型“懂”了这段时序。
+
+
+
+
+大模型微调 (LLM-based)
+
+
+GPT4TS, Time-LLM
+
+
+直接拿现成的自然语言大模型（如 GPT-2），锁死大部分参数，只微调输入输出层来处理时序。
+
+
+跨模态迁移： 认为 LLM 已经具备了极强的序列建模能力，经过微调可以处理任何“符号序列”，包括数字时序。
+
+
+
+
+6.2 大型时间序列模型 (Large Time Series Models)
+核心直觉： 规模效应与跨模态迁移。1. 借鉴 NLP 领域的成功经验，通过“大数据 + 大参数”构建时序界的 GPT。2. 探索是否可以直接用已经学富五车的自然语言模型（LLM）来“降维打击”处理数字序列。
+
+
+
+
+发展路径
+
+
+代表模型
+
+
+核心机制 (How)
+
+
+科研直觉 (Why)
+
+
+
+
+时序基础模型 (TS Foundation Models)
+
+
+TimeGPT, MOIRAI, Timer
+
+
+在超大规模的跨域时序数据集（不同频率、不同领域）上进行零样本（Zero-shot）或少样本预训练。
+
+
+全能战士： 试图通过海量数据的“见多识广”，让模型具备一种无需针对新场景训练就能直接预测的“通用时序直觉”。
+
+
+
+
+大型语言模型适配 (LLM Adaptation)
+
+
+TimeLLM, GPT4TS, LLMTime
+
+
+保持 LLM（如 LLaMA, GPT）核心参数不变，通过 Token 化对齐 和 提示词工程 (Prompting) 让 LLM “理解”数字。
+
+
+跨模态奇迹： 认为 LLM 在语言预训练中已经学会了极其复杂的逻辑推理和序列抽象，这种能力可以直接迁移到数字规律发现上。
+
+
+
+
+},
+	file = {Preprint PDF:/Users/rogers/Zotero/storage/7J6KN8SR/Wang 等 - 2026 - Deep Time Series Models A Comprehensive Survey and Benchmark.pdf:application/pdf;Snapshot:/Users/rogers/Zotero/storage/CQCZMJ2F/2407.html:text/html},
+}
+
+@misc{bai_efficient_2024,
+	title = {Efficient {Pretraining} {Data} {Selection} for {Language} {Models} via {Multi}-{Actor} {Collaboration}},
+	url = {https://arxiv.org/abs/2410.08102v3},
+	abstract = {Efficient data selection is crucial to accelerate the pretraining of language model (LMs). While various methods have been proposed to enhance data efficiency, limited research has addressed the inherent conflicts between these approaches to achieve optimal data selection for LM pretraining. To tackle this problem, we propose a multi-actor collaborative data selection mechanism: each data selection method independently prioritizes data based on its criterion and updates its prioritization rules using the current state of the model, functioning as an independent actor for data selection; and a console is designed to adjust the impacts of different actors at various stages and dynamically integrate information from all actors throughout the LM pretraining process. We conduct extensive empirical studies to evaluate our multi-actor framework. The experimental results demonstrate that our approach significantly improves data efficiency, accelerates convergence in LM pretraining, and achieves an average relative performance gain up to \$10.5{\textbackslash}\%\$ across multiple language model benchmarks compared to the state-of-the-art methods.},
+	language = {en},
+	urldate = {2026-05-25},
+	journal = {arXiv.org},
+	author = {Bai, Tianyi and Yang, Ling and Wong, Zhen Hao and Sun, Fupeng and Peng, Jiahui and Zhuang, Xinlin and Zhang, Chi and Wu, Lijun and Qiu, Jiantao and Zhang, Wentao and Yuan, Binhang and He, Conghui},
+	month = oct,
+	year = {2024},
+	annote = {\_语言-多Actor-影响函数-强化学习-数据筛选：
+1. 研究目标
+提升大规模语言模型预训练的效率，使模型在更少的 token 上快速收敛并在下游任务上取得更好表现。
+2. 多角色（Multi‑Actor）框架
+
+
+
+
+角色
+
+
+负责的度量
+
+
+实现方式
+
+
+
+
+质量 Actor
+
+
+评估数据的质量
+
+
+使用轻量的质量评分模型（如 FineWeb‑Edu）对每条数据打分
+
+
+
+
+主题 Actor
+
+
+评估数据的主题多样性
+
+
+通过 BERT‑style 主题分类器把数据划分为若干主题并给出分数
+
+
+
+
+领域 Actor
+
+
+评估数据的来源领域
+
+
+直接依据数据的元信息（Wikipedia、C4、GitHub 等）给出分数
+
+
+
+
+每个 Actor 都维护一个 权重向量（对应不同子类别的权重），并在每轮训练后根据 奖励 更新这些权重。
+3. 奖励函数——影响函数
+
+
+单样本梯度：对一条预训练样本计算交叉熵损失的梯度。
+
+
+参考任务梯度：在若干下游参考任务（如 LAMBADA、SQuAD、Jeopardy）上计算整体损失的梯度。
+
+
+Hessian：对参考任务损失的二阶导数矩阵，描述梯度随参数变化的曲率。
+
+
+影响函数将单样本梯度通过 Hessian 的逆映射到对参考任务损失的影响上，得到每条样本的 奖励。正奖励表示该样本有助于提升参考任务表现，负奖励则相反。
+4. 参数更新机制
+
+
+Actor 内部权重（\$w\_j{\textasciicircum}A\$）
+
+
+使用滑动平均：\$[w\_j{\textasciicircum}A {\textbackslash}leftarrow (1-{\textbackslash}eta\_A) w\_j{\textasciicircum}A + {\textbackslash}eta\_A {\textbackslash}bar R\_j{\textasciicircum}A]\$
+
+
+(\${\textbackslash}bar R\_j{\textasciicircum}A\$) 为该 Actor 在当前子类别上的平均奖励。
+
+
+这一步相当于强化学习中的策略梯度，把奖励直接映射到采样概率上。
+
+
+
+
+协同权重（\$({\textbackslash}theta\_A)\$）
+
+
+计算每个 Actor 的整体奖励 (\$R\_A\$) 与全局平均奖励 (\${\textbackslash}bar R\$)。
+
+
+按梯度上升方式更新：\$[ {\textbackslash}theta\_A {\textbackslash}leftarrow {\textbackslash}theta\_A + {\textbackslash}eta\_A (R\_A - {\textbackslash}bar R) ]\$
+
+
+当某 Actor 的奖励高于平均值时，它的 (\${\textbackslash}theta\$) 增大，在总分中占更大比重；反之则减小。
+
+
+
+
+总分计算\$[ S(x\_i) = {\textbackslash}theta\_\{{\textbackslash}text\{Quality\}\} S\_\{{\textbackslash}text\{Quality\}\}(x\_i) + {\textbackslash}theta\_\{{\textbackslash}text\{Domain\}\} S\_\{{\textbackslash}text\{Domain\}\}(x\_i) + {\textbackslash}theta\_\{{\textbackslash}text\{Topic\}\} S\_\{{\textbackslash}text\{Topic\}\}(x\_i) ]\$
+
+
+这里的 \$(S\_\{{\textbackslash}text\{*\}\}(x\_i))\$ 为该数据在对应 Actor 中的分数（即对应子类别的权重）。
+
+
+按总分排序，选取 Top‑K 条数据喂给主模型进行一次训练。
+
+
+
+
+5. 训练循环
+
+
+采样：每个 Actor 按当前权重采样子集。
+
+
+奖励计算：利用影响函数得到每条样本的奖励。
+
+
+权重更新：分别更新 Actor 内部权重和协同权重。
+
+
+数据选取：依据总分挑选最有价值的 Top‑K 数据。
+
+
+模型训练：对选中的数据进行一次前向‑反向传播，更新主模型参数。
+
+
+循环：回到第 1 步，直至预设的 token 预算或训练步数结束。
+
+
+6. 实验结果
+
+
+在 1.3 B、3.6 B、8 B 参数的 LLaMA‑2 变体上，平均提升约 10 \% 的下游任务准确率。
+
+
+与最强基线（如 QuRating、MATES）相比，计算 FLOPs 约为其一半至七分之一。
+
+
+多角色协同显著加速收敛，尤其在早期训练阶段表现更为突出。
+
+
+7. 结论
+
+
+多角色协同 能够在质量、主题、领域三维度之间动态平衡，解决单一度量的冲突问题。
+
+
+影响函数 为每条样本提供了可解释的贡献度量，直接用于奖励信号，驱动 Actor 的在线学习。
+
+
+该框架在不同模型规模和多任务评测上均表现出更高的 数据效率 与 计算效率，为大规模语言模型的预训练提供了一条更经济、更快速的路径。
+
+
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/IEP7IDX6/Bai 等 - 2024 - Efficient Pretraining Data Selection for Language Models via Multi-Actor Collaboration.pdf:application/pdf},
+}
+
+@misc{xie_data_2023,
+	title = {Data {Selection} for {Language} {Models} via {Importance} {Resampling}},
+	url = {http://arxiv.org/abs/2302.03169},
+	doi = {10.48550/arXiv.2302.03169},
+	abstract = {Selecting a suitable pretraining dataset is crucial for both general-domain (e.g., GPT-3) and domain-specific (e.g., Codex) language models (LMs). We formalize this problem as selecting a subset of a large raw unlabeled dataset to match a desired target distribution given unlabeled target samples. Due to the scale and dimensionality of the raw text data, existing methods use simple heuristics or require human experts to manually curate data. Instead, we extend the classic importance resampling approach used in low-dimensions for LM data selection. We propose Data Selection with Importance Resampling (DSIR), an efficient and scalable framework that estimates importance weights in a reduced feature space for tractability and selects data with importance resampling according to these weights. We instantiate the DSIR framework with hashed n-gram features for efficiency, enabling the selection of 100M documents from the full Pile dataset in 4.5 hours. To measure whether hashed n-gram features preserve the aspects of the data that are relevant to the target, we define KL reduction, a data metric that measures the proximity between the selected pretraining data and the target on some feature space. Across 8 data selection methods (including expert selection), KL reduction on hashed n-gram features highly correlates with average downstream accuracy (r=0.82). When selecting data for continued pretraining on a specific domain, DSIR performs comparably to expert curation across 8 target distributions. When pretraining general-domain models (target is Wikipedia and books), DSIR improves over random selection and heuristic filtering baselines by 2-2.5\% on the GLUE benchmark. Code is available at https://github.com/p-lambda/dsir.},
+	urldate = {2026-05-28},
+	publisher = {arXiv},
+	author = {Xie, Sang Michael and Santurkar, Shibani and Ma, Tengyu and Liang, Percy},
+	month = nov,
+	year = {2023},
+	note = {arXiv:2302.03169 [cs.CL]},
+	keywords = {Computer Science - Computation and Language, Computer Science - Machine Learning},
+	annote = {\_语言-基于高低质量对比-词袋分解-语言模型-重要性采样:
+已知高质量子集，词袋稀缺程度重合度采样从全量数据采样同样词袋高质量子集。
+\#\# 核心背景：为什么要选择数据？
+训练大语言模型就像教学生读书。如果你给学生看太多杂乱无章、充满废话的网页信息（比如原始的互联网数据），他学到的知识也会很零碎。为了让模型在特定领域（比如医疗、编程）或者通用领域表现更好，研究人员通常需要从一个巨大的“原始仓库”中挑选出最像“教科书”（目标数据）的内容。
+过去的方法要么靠专家手动挑选（太慢），要么靠简单的规则（比如通过关键词过滤，不够灵活）。DSIR 则提供了一种既快又科学的自动化方案。
+
+\#\# DSIR 方法拆解：它是如何工作的？
+即便你没有背景知识，也可以将 DSIR 的过程想象成一个**“智能筛选漏斗”**。它主要分为三个步骤：
+\#\#\# 1. 提取“特征”（把文字变成数字）
+直接处理成千上亿行的文字非常慢且复杂。DSIR 采用了一种叫 “哈希 n-gram” (Hashed n-gram) 的技术。
+
+
+n-gram：就是把一句话切成由 \$n\$ 个词组成的片段（比如“我爱学习”可以切成“我爱”、“爱学”、“学习”）。
+
+
+哈希 (Hashed)：为了节省空间，它把这些词片段通过数学变换变成一个个数字编号。
+
+
+作用：这就好比不再去读整本书，而是统计每本书里某些关键词频次的“配方表”。Feature Space
+
+
+\#\#\# 2. 计算“重要性权重”（衡量有多像目标）
+假设你手里有一小份高质量的“样板数据”（比如维基百科），还有一堆巨大的“原始数据”（比如整个互联网）。
+
+
+DSIR 会对比两者的“配方表”。
+
+
+如果某个特征在“样板数据”中经常出现，但在“原始数据”中很少见，那么包含这个特征的数据就被认为具有高权重，也就是更“重要”。Importance Weights
+
+
+\#\#\# 3. 智能抽样（重采样）
+有了权重后，我们不是简单地只选分最高的那些数据（因为那会导致数据太单一，比如全是同一篇好文章的副本），而是进行重采样。
+
+
+这就像一场有偏向的抽样：权重越高的数据，被选中的概率越大。
+
+
+这样选出来的最终数据集，在统计分布上会非常接近你的“样板数据”，同时又保持了足够的多样性。Resampling
+
+
+
+\#\# 为什么这个方法很厉害？
+
+
+速度极快：它可以在 4.5 小时内处理完包含 1 亿个文档的超大数据集（The Pile）。Efficiency
+
+
+效果显著：在通用语言模型的测试（GLUE）中，用 DSIR 选出的数据训练出来的模型，比随机选数据训练出的模型准确率提升了 2\% 到 2.5\%。Results
+
+
+科学的衡量指标：作者提出了 KL Reduction 指标。简单来说，这个指标能通过数学计算，在不训练模型的情况下，提前预测出这批选出的数据到底好不好用。实验证明，这个指标与模型最终的考试分数（准确率）高度相关。
+
+
+
+“由于 KL 还原与下游任务性能高度相关，且计算成本极低（无需训练模型），它可以作为未来数据选择方法的‘健康检查’。” KL Reduction
+
+},
+	annote = {Comment: NeurIPS 2023},
+	file = {Preprint PDF:/Users/rogers/Zotero/storage/UI3IPLZ6/Xie 等 - 2023 - Data Selection for Language Models via Importance Resampling.pdf:application/pdf;Snapshot:/Users/rogers/Zotero/storage/UHA8PIPW/2302.html:text/html},
+}
+
+@misc{paul_deep_2021,
+	title = {Deep {Learning} on a {Data} {Diet}: {Finding} {Important} {Examples} {Early} in {Training}},
+	shorttitle = {Deep {Learning} on a {Data} {Diet}},
+	url = {https://arxiv.org/abs/2107.07075v2},
+	abstract = {Recent success in deep learning has partially been driven by training increasingly overparametrized networks on ever larger datasets. It is therefore natural to ask: how much of the data is superfluous, which examples are important for generalization, and how do we find them? In this work, we make the striking observation that, in standard vision datasets, simple scores averaged over several weight initializations can be used to identify important examples very early in training. We propose two such scores -- the Gradient Normed (GraNd) and the Error L2-Norm (EL2N) scores -- and demonstrate their efficacy on a range of architectures and datasets by pruning significant fractions of training data without sacrificing test accuracy. In fact, using EL2N scores calculated a few epochs into training, we can prune half of the CIFAR10 training set while slightly improving test accuracy. Furthermore, for a given dataset, EL2N scores from one architecture or hyperparameter configuration generalize to other configurations. Compared to recent work that prunes data by discarding examples that are rarely forgotten over the course of training, our scores use only local information early in training. We also use our scores to detect noisy examples and study training dynamics through the lens of important examples -- we investigate how the data distribution shapes the loss surface and identify subspaces of the model's data representation that are relatively stable over training.},
+	language = {en},
+	urldate = {2026-05-28},
+	journal = {arXiv.org},
+	author = {Paul, Mansheej and Ganguli, Surya and Dziugaite, Gintare Karolina},
+	month = jul,
+	year = {2021},
+	annote = {\_GraNd\&EL2N样本难度度量-样本难度在训练在早期就可见:
+论文的核心贡献就是提出了两种在训练早期即可计算的快速难度评分——梯度范数（GraNd）和误差 L2‑范数（EL2N），并通过大量实验证明，这两种评分能够有效地挑选出对模型学习最关键的样本，从而实现高效的数据剪枝和课程学习。
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/RZIKR9R6/Paul 等 - 2021 - Deep Learning on a Data Diet Finding Important Examples Early in Training.pdf:application/pdf},
+}
+
+@misc{pennino_optimizing_2025,
+	title = {Optimizing the {Training} {Diet}: {Data} {Mixture} {Search} for {Robust} {Time} {Series} {Forecasting}},
+	shorttitle = {Optimizing the {Training} {Diet}},
+	url = {https://arxiv.org/abs/2512.11546v1},
+	abstract = {The standard paradigm for training deep learning models on sensor data assumes that more data is always better. However, raw sensor streams are often imbalanced and contain significant redundancy, meaning that not all data points contribute equally to model generalization. In this paper, we show that, in some cases, "less is more" when considering datasets. We do this by reframing the data selection problem: rather than tuning model hyperparameters, we fix the model and optimize the composition of the training data itself. We introduce a framework for discovering the optimal "training diet" from a large, unlabeled time series corpus. Our framework first uses a large-scale encoder and k-means clustering to partition the dataset into distinct, behaviorally consistent clusters. These clusters represent the fundamental 'ingredients' available for training. We then employ the Optuna optimization framework to search the high-dimensional space of possible data mixtures. For each trial, Optuna proposes a specific sampling ratio for each cluster, and a new training set is constructed based on this recipe. A smaller target model is then trained and evaluated. Our experiments reveal that this data-centric search consistently discovers data mixtures that yield models with significantly higher performance compared to baselines trained on the entire dataset. Specifically - evaluated on PMSM dataset - our method improved performance from a baseline MSE of 1.70 to 1.37, a 19.41\% improvement.},
+	language = {en},
+	urldate = {2026-06-01},
+	journal = {arXiv.org},
+	author = {Pennino, Federico and Gabbrielli, Maurizio},
+	month = dec,
+	year = {2025},
+	annote = {\_时序-数据分箱采样比优化问题-基于训练评估-选择数据：
+1. 针对什么问题？
+在利用传感器监控机器（如电机）时，人们通常认为**“数据越多越好”。但实际上，海量数据中充满了大量重复、没用且乱七八糟的信息**，这就像吃饭时吞下了太多没有营养的“填料”，不仅让模型学得慢，还会干扰它掌握核心规律。
+2. 基于什么假设？
+文章基于一个核心假设：“少即是多”。 研究者认为，并不是所有数据都对学习有帮助。如果能把数据像食材一样分类，然后只挑选出那些最有营养、最能反映机器运行特征的“核心食材”进行搭配，模型即便吃得更少（数据量更小），也能长得更壮（预测更准）。 Abstract
+3. 方法是什么？
+这套方法被称为打造“训练餐单”，分为三步：
+
+
+第一步：自动归类。利用电脑程序把乱如麻的数据自动分堆，一共分成36个“盒子”，每个盒子代表机器的一种运行状态（比如启动、停止、加速等）。
+
+
+第二步：配比搜索。雇佣一个“自动化教练”（优化器）来做实验。教练会不断尝试：从盒子A拿10\%的数据，盒子B拿80\%的数据……拼凑出一份份不同的“试吃餐单”。
+
+
+第三步：实战演练。用每一份餐单训练出一个预测模型，谁的表现好，教练就记住这套配比。最终找到那套黄金配比。 Pipeline
+
+
+4. 实验如何证明有效？
+研究者拿一个电动机温度预测的真实场景进行了测试：
+
+
+数据量减半：经过筛选后的最优数据量只有原来的 43\%。
+
+
+准确度大幅提升：虽然数据少了一大半，但预测的准确度反而提升了约 20\%。
+
+
+证明了“去粗取精”的威力：实验发现，被教练丢弃的数据大多是机器关机时的静默信号或无意义的杂音，而保留的都是反映机器性能的关键瞬间。 Results
+
+
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/YYCRM362/Pennino和Gabbrielli - 2025 - Optimizing the Training Diet Data Mixture Search for Robust Time Series Forecasting.pdf:application/pdf},
+}
+
+@misc{sachdeva_how_2024,
+	title = {How to {Train} {Data}-{Efficient} {LLMs}},
+	url = {http://arxiv.org/abs/2402.09668},
+	doi = {10.48550/arXiv.2402.09668},
+	abstract = {The training of large language models (LLMs) is expensive. In this paper, we study data-efficient approaches for pre-training LLMs, i.e., techniques that aim to optimize the Pareto frontier of model quality and training resource/data consumption. We seek to understand the tradeoffs associated with data selection routines based on (i) expensive-to-compute data-quality estimates, and (ii) maximization of coverage and diversity-based measures in the feature space. Our first technique, Ask-LLM, leverages the zero-shot reasoning capabilities of instruction-tuned LLMs to directly assess the quality of a training example. To target coverage, we propose Density sampling, which models the data distribution to select a diverse sample. In our comparison of 19 samplers, involving hundreds of evaluation tasks and pre-training runs, we find that Ask-LLM and Density are the best methods in their respective categories. Coverage sampling can recover the performance of the full data, while models trained on Ask-LLM data consistently outperform full-data training -- even when we reject 90\% of the original dataset, while converging up to 70\% faster.},
+	urldate = {2026-06-06},
+	publisher = {arXiv},
+	author = {Sachdeva, Noveen and Coleman, Benjamin and Kang, Wang-Cheng and Ni, Jianmo and Hong, Lichan and Chi, Ed H. and Caverlee, James and McAuley, Julian and Cheng, Derek Zhiyuan},
+	month = feb,
+	year = {2024},
+	note = {arXiv:2402.09668 [cs.LG]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Machine Learning, Computer Science - Computation and Language},
+	annote = {\_语言-特征空间密度采样-LSH投影降维-分布优先的采样：
+来自谷歌DeepMind的一篇研究。
+1. 研究背景与核心动机
+大语言模型（LLM）的预训练受限于“缩放定律”（Scaling Laws），即单纯增加模型参数或数据量带来的收益呈指数级递减。为了优化预训练的帕累托前沿（在更少的计算资源下达到更好的模型性能），本文提出了两种互补的数据筛选策略：
+
+
+ASK-LLM (质量维度)：利用指令微调模型作为“面试官”，直接评估数据的知识含量。
+
+
+DENSITY (覆盖维度)：在特征空间建模数据分布，通过消除冗余提升数据的多样性与覆盖率。
+
+
+
+2. DENSITY 方法：基于分布的覆盖率采样
+DENSITY 的核心目标是：在语义特征空间中实现均匀采样。 它通过降低高密度区域（冗余数据）的权重，提升低密度区域（独特数据）的权重，使模型在有限的 Token 预算内见识到最广的话题。
+2.1 技术流程流水线
+该方法通过以下步骤实现流式处理：
+
+
+特征提取：利用预训练的编码器（如 Sentence-T5）将文本映射到高维连续特征空间 \${\textbackslash}mathbb\{R\}{\textasciicircum}D\$（例如 768 维）。
+
+
+随机线性投影（LSH）： 使用局部敏感哈希（LSH）将高维向量投影到多个随机方向，并进行离散化分箱。公式定义为： \$h(x) = {\textbackslash}lfloor {\textbackslash}frac\{a {\textbackslash}cdot x + b\}\{{\textbackslash}lambda\} {\textbackslash}rfloor\$ （基于随机向量\$x\$的线性投影，并加上向下取整） 。其中 \$a\$ 是从 \$p\$-稳定分布采样的随机投影向量，\$b\$ 是随机偏移，\${\textbackslash}lambda\$ 是控制分辨率的带宽。
+
+
+构建统计速写（Sketch Matrix）： 维护一个 \$R {\textbackslash}times B\$ 的计数矩阵（\$R\$ 为哈希函数个数，\$B\$ 为桶数。哈希函数的个数取决于随机值\$x\$、\$b\$、\$λ\$。）。
+
+
+第一遍扫描（Pass 1）：计算每条数据的哈希位置，并在矩阵对应格子执行 +1。该矩阵最终成为特征空间的“人口分布地图”。
+
+
+
+
+密度评估与反向采样：
+
+
+第二遍扫描（Pass 2）：重新计算数据的哈希位置，从矩阵中提取 \$R\$ 个视角的计数值并求平均，得到该点的密度得分 \$S(x)\$。
+
+
+
+
+概率抽签： 计算采样概率 \$p(x) {\textbackslash}propto {\textbackslash}frac\{1\}\{S(x)\}\$。通过伯努利抽签决定该数据是否进入最终训练集。（1）这里的伯努利抽签指的是，无关于其他样本条目，单独只针对它进行非一即零的抽签。有采样概率 \$p(x)\$ 的概率得到一，也就是被抽签。有 \$1 - p(x)\$ 概率抽到0，也就是不被抽签。（2）如果说想要对整个被采样的比例进行缩放，只需要在这一步乘以一个factor。比如，只想要采样整个数据集中百分之十的数据集做训练，那么这里的factor就是 0.1。
+
+
+
+3. 为什么选择“投影 + 哈希”？（核心权衡分析）
+在处理数亿级数据时，DENSITY 避开了传统几何方法的死穴：
+3.1 破解“维度诅咒” (Curse of Dimensionality)
+在高维空间（如 768 维），点与点之间的距离趋于一致，传统的近邻搜索会失效。
+
+
+降维视角：LSH 并不是为了精确区分，而是通过随机线性投影找到多个“低维切面”。
+
+
+距离保持：根据数学特性，在原始空间相近的点，投影后在数轴上依然靠得近，从而保证了碰撞（进入同一个桶）的概率与原始密度正相关。
+
+
+3.2 计算量与复杂度的降级
+
+
+对抗 \$O(N{\textasciicircum}2)\$：如果直接做密度估计，需要计算全量数据的成对相似度，这在工程上是不可行的。哈希将复杂度降为 \$O(N {\textbackslash}cdot R)\$，即线性时间复杂度。
+
+
+极致的内存压缩：由于不存储原始特征向量和索引，只存储计数的“速写矩阵”，本研究仅用 80MB 内存便完成了对 3.6 亿条数据的密度建模。
+
+
+3.3 存储与索引的权衡
+
+
+无须存标签：两阶段扫描（Two-Pass）的设计避免了存储海量数据的采样标签。通过“实时重算哈希”代替“读取 TB 级索引”，极大优化了 I/O 效率。
+
+
+3.4 缺陷
+由于需要现场计算LSH进行概率轨估计，还是得存样本自己的特征向量-{\textgreater}LSH才能计算（因为是feature-based LSH）。要么就只能保存编码器模型，现场计算映射到特征空间，然后再映射到LSH。所以要么因为feature的维度比较大，七百六十八维，存储大概需要花个一T的空间，同时还要处理原始样本索引到feature的映射，要么就只能使用编码器模型现场计算。计算时间长。
+
+4. ASK-LLM 方法简述
+作为 DENSITY 的补充，ASK-LLM 侧重于数据质量而非分布。
+
+
+逻辑：给定一段文本，询问代理 LLM（如 Flan-T5）：“这段文字是否有助于预训练？是否有价值？”
+
+
+优势：它能识别出传统“困惑度（Perplexity）”无法过滤的语义冗余或逻辑垃圾（例如没有答案的问题、无休止的自我重复）。
+
+
+结论：ASK-LLM 在极低采样率（如仅保留 10\% 数据）时表现惊人，能够显著超越全量数据训练的效果。
+
+
+
+5. 对跨领域研究的启示
+
+
+分布优先：在任何需要提升覆盖面的领域，DENSITY 提供的“反频率采样”都是一种通用且廉价的工具。
+
+
+带宽 \${\textbackslash}lambda\$ 的调节：在其他领域应用时，\${\textbackslash}lambda\$ 的设置应参考特征空间内数据的平均距离，它决定了识别冗余的粒度。
+
+
+多视角平滑：使用多个哈希函数（\$R\$ 较大）是保证密度估计稳健的关键，能有效抵御分箱边界带来的随机误差。
+
+
+},
+	annote = {Comment: Under review. 44 pages, 30 figures},
+	file = {Preprint PDF:/Users/rogers/Zotero/storage/7T8WDNTB/Sachdeva 等 - 2024 - How to Train Data-Efficient LLMs.pdf:application/pdf;Snapshot:/Users/rogers/Zotero/storage/WNYR7763/2402.html:text/html},
+}
+
+@misc{liu_quadmix_2025,
+	title = {{QuaDMix}: {Quality}-{Diversity} {Balanced} {Data} {Selection} for {Efficient} {LLM} {Pretraining}},
+	copyright = {Creative Commons Attribution 4.0 International},
+	shorttitle = {{QuaDMix}},
+	url = {https://arxiv.org/abs/2504.16511},
+	doi = {10.48550/ARXIV.2504.16511},
+	abstract = {Quality and diversity are two critical metrics for the training data of large language models (LLMs), positively impacting performance. Existing studies often optimize these metrics separately, typically by first applying quality filtering and then adjusting data proportions. However, these approaches overlook the inherent trade-off between quality and diversity, necessitating their joint consideration. Given a fixed training quota, it is essential to evaluate both the quality of each data point and its complementary effect on the overall dataset. In this paper, we introduce a unified data selection framework called QuaDMix, which automatically optimizes the data distribution for LLM pretraining while balancing both quality and diversity. Specifically, we first propose multiple criteria to measure data quality and employ domain classification to distinguish data points, thereby measuring overall diversity. QuaDMix then employs a unified parameterized data sampling function that determines the sampling probability of each data point based on these quality and diversity related labels. To accelerate the search for the optimal parameters involved in the QuaDMix framework, we conduct simulated experiments on smaller models and use LightGBM for parameters searching, inspired by the RegMix method. Our experiments across diverse models and datasets demonstrate that QuaDMix achieves an average performance improvement of 7.2\% across multiple benchmarks. These results outperform the independent strategies for quality and diversity, highlighting the necessity and ability to balance data quality and diversity.},
+	urldate = {2026-06-06},
+	publisher = {arXiv},
+	author = {Liu, Fengze and Zhou, Weidong and Liu, Binbin and Yu, Zhimiao and Zhang, Yifan and Lin, Haobin and Yu, Yifeng and Zhang, Bingni and Zhou, Xiaohuan and Wang, Taifeng and Cao, Yong},
+	year = {2025},
+	note = {Version Number: 2},
+	keywords = {Computation and Language (cs.CL), FOS: Computer and information sciences},
+	annote = {\_语言-质量和多样性权衡-打分排名-训练反馈循环超参数优化：
+字节
+1. 核心挑战：质量与多样性的权衡
+在 LLM 预训练中，数据**质量（Quality）和多样性（Diversity）**通常是相互冲突的。传统的做法是先进行硬性的质量过滤，再手动调整领域比例。这种做法忽略了两者之间的耦合关系：特定的质量过滤器往往会无意中偏向某些领域，从而破坏整体的多样性。
+2. QuaDMix 框架设计
+QuaDMix 提出了一种统一的参数化方案，将数据选择从“人工筛选”转向“数学优化”。
+数据标注
+
+
+领域标签：利用分类器为每个文档标记所属领域 \$m\$。
+
+
+质量标签：利用多个预训练好的打分器（如 DCLM、Fineweb-edu 等）提取多维度质量分。
+
+
+排名与合并
+在每个领域内部，系统利用权重参数 \${\textbackslash}alpha\$ 将不同维度的质量分合并，并计算该文档在所属领域内的百分比排名 \${\textbackslash}bar\{r\}\$。这种设计允许不同领域拥有不同的“好数据”标准。
+3. 核心数学模型：软阈值采样函数
+QuaDMix 不使用传统的硬过滤，而是通过一个参数化的 Sigmoid 函数来决定每个文档的采样频率 \$S({\textbackslash}bar\{r\})\$。
+\$S({\textbackslash}bar\{r\}) = {\textbackslash}left( {\textbackslash}frac\{2\}\{1+e{\textasciicircum}\{-{\textbackslash}lambda\_m({\textbackslash}omega\_m-{\textbackslash}bar\{r\})\}\} {\textbackslash}right){\textasciicircum}\{{\textbackslash}eta\_m\} + {\textbackslash}epsilon\_m\$
+参数物理含义解读：
+
+
+\${\textbackslash}omega\_m\$ (质量阈值)：决定了该领域的保留基准。若排名低于此值，采样频率会大幅下降。
+
+
+\${\textbackslash}lambda\_m\$ (下降坡度)：控制过滤的严苛程度。值越大，越趋向于只保留极高质量的数据。
+
+
+\${\textbackslash}eta\_m\$ (缩放系数)：调节高质量数据的“复读”次数，实现对精华数据的过采样。
+
+
+\${\textbackslash}epsilon\_m\$ (多样性保底)：即使质量较差的数据也保留微小的采样概率，确保模型见识过长尾分布的知识，维持多样性。
+
+
+4. 代理模型驱动的自动化搜索
+为了避免在大规模模型上进行昂贵的尝试，QuaDMix 采用了代理模型优化的策略：
+
+
+小规模实验：在 1M 参数的极小模型上进行 3000 次不同参数配置的训练实验。
+
+
+回归建模：利用 LightGBM 训练一个回归模型，学习“参数配置 \${\textbackslash}to\$ 验证集性能”的对应规律。
+
+
+最优预测：在回归模型上搜索预测 Loss 最小的参数组合，将其迁移至正式的 530M 模型训练中。
+
+
+5. 核心洞察与结论
+
+
+数据中心化（Data-centric）自动化：通过将数据选择抽象为一组可优化的超参数，实现了从“猜测数据比例”到“预测最优配方”的范式转变。
+
+
+跨准则互补：合并多个质量打分器能有效减少单一工具的偏见，通过回归优化可以自动发现不同打分器在不同领域中的价值。
+
+
+性能提升：这种联合优化的方法比单纯优化质量或单纯优化领域比例的方法性能更好，在主流基准测试中平均提升了约 7.2\%。
+
+
+},
+}
+
+@misc{liang_enabling_2024,
+	title = {Enabling {Time}-series {Foundation} {Model} for {Building} {Energy} {Forecasting} via {Contrastive} {Curriculum} {Learning}},
+	url = {https://arxiv.org/abs/2412.17285v1},
+	abstract = {Advances in time-series forecasting are driving a shift from conventional machine learning models to foundation models (FMs) that are trained with generalized knowledge. However, existing FMs still perform poorly in the energy fields, such as building energy forecasting (BEF). This paper studies the adaptation of FM to BEF tasks. We demonstrate the shortcomings of fine-tuning FM straightforwardly from both the perspectives of FM and the data. To overcome these limitations, we propose a new {\textbackslash}textit\{contrastive curriculum learning\}-based training method. Our method optimizes the ordering of training data in the context of TSFM adaptation. Experiments show that our method can improve the zero/few-shot performance by 14.6{\textbackslash}\% compared to the existing FMs. Our code and new TSFM will be available at {\textless}Anonymous Github Repo{\textgreater}.},
+	language = {en},
+	urldate = {2026-06-06},
+	journal = {arXiv.org},
+	author = {Liang, Rui and Deng, Yang and Xie, Donghua and He, Fang and Wang, Dan},
+	month = dec,
+	year = {2024},
+	annote = {\_时序课程学习-对比学习找虚拟样本对应真是样本-进行难度传递:
+
+1. 核心背景：通用模型的“水土不服”
+虽然时间序列基础模型（TSFM）在天气、金融领域表现出色，但在**建筑能耗预测（BEF）**领域遇到了瓶颈：
+
+
+数据稀缺与隐私：真实建筑能耗数据受隐私保护，极难获取；研究多依赖模拟软件生成的“假数据”。
+
+
+微调效果差：直接用混合数据（真+假）对基础模型进行传统微调，准确率提升不到 1\%，无法满足工程需求。
+
+
+模式复杂：不同建筑的用电模式受行为、气候、设备影响巨大，模型难以捕捉统一规律。
+
+
+2. 核心方案：对比感知课程学习（CCL）
+作者提出了一种“循序渐进”的适配方法，将训练过程分为难度评估和进度调度两个阶段。
+A. 难度测量：给数据打分
+该方法区分处理真实数据和模拟数据，解决“假数据难度难定义”的问题：
+
+
+真实数据：直接看模型预测得准不准，误差越大，难度越高。
+
+
+模拟数据（对比学习桥梁）：
+
+
+逻辑：不看外形是否相似，看“模型理解起来是否一样难”。认为预测误差相近则理解程度相同，预测误差相差很大则理解程度相差很大。预测误差小则理解程度高，反之理解程度低。
+
+
+做法：模拟样本的难度衡量不精确，因此需要找对应的真实样本作难度传递。构建正样本为预测相差小的样本对，负样本为预测相差大的样本对。训练出来的模型能够找到正样本对，也就是相差小的样本对，从而进行虚拟样本和真实样本的匹配-难度传递。
+
+
+结果：将模拟样本映射到向量空间，找到与之对应的、难度已知的真实样本，从而实现难度的跨数据集传递。
+
+
+
+
+B. 进度调度：从易到难
+
+
+线性增长策略：训练初期只给模型看最简单的 20\% 样本。
+
+
+动态调整：随着轮数增加，逐渐加入更高难度的样本，直到最后使用全量数据。
+
+
+目的：让模型先掌握基础能耗规律（如季节性、昼夜规律），再学习复杂的异常波动。
+
+
+3. 技术关键点
+
+
+打破“视觉相似”陷阱：该方法强调“模型理解难度相似”而非物理波形的“形状相似”。
+
+
+特征提取器：采用时间卷积网络（TCN）来提取建筑用电特有的日、周周期特征。
+
+
+通用性强：在 IBM Granite 和 Amazon Chronos 两种不同架构的基础模型上均验证有效。
+
+
+4. 实验结论
+
+
+性能飞跃：相比直接微调，CCL 方法将预测误差降低了 10\% - 15\%。
+
+
+零样本能力：即便在完全没见过的建筑上进行“盲测”（Zero-shot），其表现也优于许多专门训练的传统模型。
+
+
+规模效应：随着微调数据集的增大，该方法展现出比传统微调更强的性能增长潜力。
+
+
+
+一句话总结：该研究通过对比学习搭建了真假数据之间的“难度桥梁”，利用课程学习让 AI 从简单规律学起，成功将通用的时间序列模型转化为了专业的建筑能耗专家。
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/58NG8V2A/Liang 等 - 2024 - Enabling Time-series Foundation Model for Building Energy Forecasting via Contrastive Curriculum Lea.pdf:application/pdf},
+}
+
+@misc{abel_dual-criterion_2026,
+	title = {Dual-{Criterion} {Curriculum} {Learning}: {Application} to {Temporal} {Data}},
+	shorttitle = {Dual-{Criterion} {Curriculum} {Learning}},
+	url = {https://arxiv.org/abs/2603.23573v1},
+	abstract = {Curriculum Learning (CL) is a meta-learning paradigm that trains a model by feeding the data instances incrementally according to a schedule, which is based on difficulty progression. Defining meaningful difficulty assessment measures is crucial and most usually the main bottleneck for effective learning, while also in many cases the employed heuristics are only application-specific. In this work, we propose the Dual-Criterion Curriculum Learning (DCCL) framework that combines two views of assessing instance-wise difficulty: a loss-based criterion is complemented by a density-based criterion learned in the data representation space. Essentially, DCCL calibrates training-based evidence (loss) under the consideration that data sparseness amplifies the learning difficulty. As a testbed, we choose the time-series forecasting task. We evaluate our framework on multivariate time-series benchmarks under standard One-Pass and Baby-Steps training schedules. Empirical results show the interest of density-based and hybrid dual-criterion curricula over loss-only baselines and standard non-CL training in this setting.},
+	language = {en},
+	urldate = {2026-06-06},
+	journal = {arXiv.org},
+	author = {Abel, Gaspard and Campagne, Eloi and Benloughmari, Mohamed and Kalogeratos, Argyris},
+	month = mar,
+	year = {2026},
+	annote = {\_时序-增加密度/常见程度考虑的-课程学习新难度衡量：
+1. 核心思想：给数据“排课表”
+这篇文章的核心贡献在于：重新定义了什么是“简单”，什么是“难”。
+2. 两个关键难度指标 (Dual-Criterion)
+作者认为，仅靠模型表现来判断难度是不够的，需要结合“模型视角”和“数据视角”：
+
+
+指标 A：预测损失 (Loss) —— “模型视角”
+
+
+逻辑：模型预测得越准，样本就越简单。
+
+
+特点：它是动态的，反映了模型当前的掌握程度。
+
+
+
+
+指标 B：数据密度 (Density) —— “数据视角”
+
+
+逻辑：数据模式越常见（密度高），就越简单。
+
+
+特点：它是本质的，反映了数据是否属于“大众模式”。在时间序列中，典型的周期性规律就是高密度，而罕见的突发状况就是低密度。
+
+
+
+
+3. 理解1 + 1 {\textgreater} 1
+正如你在讨论中总结的，文章的核心逻辑是：在难度估计上做文章，把密度作为一个必选指标。
+
+
+更好的难度估计：两个指标结合能提供比单一指标更全面、更稳健的评估。
+
+
+互补效应：Loss 指标告诉模型“哪些还没学会”，Density 指标告诉模型“哪些是应该先稳固的基础规律”。
+
+
+4. 技术实现路径
+为了让这两个指标落地，作者设计了一套标准流程：
+
+
+特征嵌入 (Embedding)：利用 Transformer 或 LSTM 将复杂的时间序列转化为向量空间中的点。
+
+
+计算密度：在向量空间中通过 k-NN 或核密度估计（KDE）来衡量每个点的稀疏程度。
+
+
+混合策略：
+
+
+数值/排名加权：给 Loss 和 Density 各分配一个权重，算出一个综合难度分。
+
+
+二维网格法 (Grid)：将 Loss 和 Density 作为两个坐标轴，将数据划分为不同的难度等级块。
+
+
+
+
+5. 实验结论与启发
+
+
+混合指标确实更强：在电力、流感、天气等多个数据集上，双准则的表现均优于单一指标。
+
+
+对抗异常值：密度指标能有效识别出那些因稀少而导致的“假性困难”或“异常干扰”，防止模型在训练初期被极端样本带偏。
+
+
+适用性广：这种“模型+数据”的双重评价体系不仅适用于时间序列，也可以推广到其他复杂的机器学习任务中。
+
+
+},
+	file = {Full Text PDF:/Users/rogers/Zotero/storage/BMMYVP3C/Abel 等 - 2026 - Dual-Criterion Curriculum Learning Application to Temporal Data.pdf:application/pdf},
+}
+
+@misc{ansari_chronos_2024,
+	title = {Chronos: {Learning} the {Language} of {Time} {Series}},
+	shorttitle = {Chronos},
+	url = {http://arxiv.org/abs/2403.07815},
+	doi = {10.48550/arXiv.2403.07815},
+	abstract = {We introduce Chronos, a simple yet effective framework for pretrained probabilistic time series models. Chronos tokenizes time series values using scaling and quantization into a fixed vocabulary and trains existing transformer-based language model architectures on these tokenized time series via the cross-entropy loss. We pretrained Chronos models based on the T5 family (ranging from 20M to 710M parameters) on a large collection of publicly available datasets, complemented by a synthetic dataset that we generated via Gaussian processes to improve generalization. In a comprehensive benchmark consisting of 42 datasets, and comprising both classical local models and deep learning methods, we show that Chronos models: (a) significantly outperform other methods on datasets that were part of the training corpus; and (b) have comparable and occasionally superior zero-shot performance on new datasets, relative to methods that were trained specifically on them. Our results demonstrate that Chronos models can leverage time series data from diverse domains to improve zero-shot accuracy on unseen forecasting tasks, positioning pretrained models as a viable tool to greatly simplify forecasting pipelines.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Ansari, Abdul Fatir and Stella, Lorenzo and Turkmen, Caner and Zhang, Xiyuan and Mercado, Pedro and Shen, Huibin and Shchur, Oleksandr and Rangapuram, Syama Sundar and Arango, Sebastian Pineda and Kapoor, Shubham and Zschiegner, Jasper and Maddix, Danielle C. and Wang, Hao and Mahoney, Michael W. and Torkkola, Kari and Wilson, Andrew Gordon and Bohlke-Schneider, Michael and Wang, Yuyang},
+	month = nov,
+	year = {2024},
+	note = {arXiv:2403.07815 [cs.LG]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Machine Learning},
+	annote = {时序token化+语言模型架构预训练
+数据多样性仅依赖领域覆盖+TSMixup/KernelSynth增强，无信号特征多样性，无课程学习。
+
+**参考价值**：主流TSFM数据策略缺陷的典型证据。
+},
+	annote = {Comment: Code and model checkpoints available at https://github.com/amazon-science/chronos-forecasting},
+	file = {Snapshot:/Users/rogers/Zotero/storage/T5APNSKU/2403.html:text/html},
+}
+
+@misc{liu_timer-s1_2026,
+	title = {Timer-{S1}: {A} {Billion}-{Scale} {Time} {Series} {Foundation} {Model} with {Serial} {Scaling}},
+	shorttitle = {Timer-{S1}},
+	url = {http://arxiv.org/abs/2603.04791},
+	doi = {10.48550/arXiv.2603.04791},
+	abstract = {We introduce Timer-S1, a strong Mixture-of-Experts (MoE) time series foundation model with 8.3B total parameters, 0.75B activated parameters for each token, and a context length of 11.5K. To overcome the scalability bottleneck in existing pre-trained time series foundation models, we perform Serial Scaling in three dimensions: model architecture, dataset, and training pipeline. Timer-S1 integrates sparse TimeMoE blocks and generic TimeSTP blocks for Serial-Token Prediction (STP), a generic training objective that adheres to the serial nature of forecasting. The proposed paradigm introduces serial computations to improve long-term predictions while avoiding costly rolling-style inference and pronounced error accumulation in the standard next-token prediction. Pursuing a high-quality and unbiased training dataset, we curate TimeBench, a corpus with one trillion time points, and apply meticulous data augmentation to mitigate predictive bias. We further pioneer a post-training stage, including continued pre-training and long-context extension, to enhance short-term and long-context performance. Evaluated on the large-scale GIFT-Eval leaderboard, Timer-S1 achieves state-of-the-art forecasting performance, attaining the best MASE and CRPS scores as a pre-trained model. Timer-S1 is released to facilitate further research.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Liu, Yong and Su, Xingjian and Wang, Shiyu and Zhang, Haoran and Liu, Haixuan and Wang, Yuxuan and Ye, Zhou and Xiang, Yang and Wang, Jianmin and Long, Mingsheng},
+	month = apr,
+	year = {2026},
+	note = {arXiv:2603.04791 [cs.AI]},
+	keywords = {Computer Science - Artificial Intelligence},
+	annote = {唯一显式计算信号特征（ADF统计量+谱熵）的TSFM，但仅用于事后评估，未指导数据选择或课程学习。
+两阶段训练基于预测步长而非信号特征。ARIMA变量筛选是唯一基于信号特征的数据筛选，但仅用自回归性一个维度。
+
+**参考价值**：本研究最直接的前驱论文——证明信号特征可计算可评估，但未走到"用信号特征做数据选择和课程学习"这一步。本研究填补这一空白。
+},
+	file = {Snapshot:/Users/rogers/Zotero/storage/93XEWKGX/2603.html:text/html},
+}
+
+@misc{das_decoder-only_2024,
+	title = {A decoder-only foundation model for time-series forecasting},
+	url = {http://arxiv.org/abs/2310.10688},
+	doi = {10.48550/arXiv.2310.10688},
+	abstract = {Motivated by recent advances in large language models for Natural Language Processing (NLP), we design a time-series foundation model for forecasting whose out-of-the-box zero-shot performance on a variety of public datasets comes close to the accuracy of state-of-the-art supervised forecasting models for each individual dataset. Our model is based on pretraining a patched-decoder style attention model on a large time-series corpus, and can work well across different forecasting history lengths, prediction lengths and temporal granularities.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Das, Abhimanyu and Kong, Weihao and Sen, Rajat and Zhou, Yichen},
+	month = apr,
+	year = {2024},
+	note = {arXiv:2310.10688 [cs.CL]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Computation and Language, Computer Science - Machine Learning},
+	annote = {TimesFM:Google 200M参数时序基础模型。Wiki Pageviews占约95\%数据，严重偏向单一领域。合成数据含ARMA/季节/趋势但未用这些特征做数据选择。无课程学习。
+
+**参考价值**：数据配比严重偏向自然可获得性的典型证据。
+},
+}
+
+@misc{nie_time_2023,
+	title = {A {Time} {Series} is {Worth} 64 {Words}: {Long}-term {Forecasting} with {Transformers}},
+	shorttitle = {A {Time} {Series} is {Worth} 64 {Words}},
+	url = {http://arxiv.org/abs/2211.14730},
+	doi = {10.48550/arXiv.2211.14730},
+	abstract = {We propose an efficient design of Transformer-based models for multivariate time series forecasting and self-supervised representation learning. It is based on two key components: (i) segmentation of time series into subseries-level patches which are served as input tokens to Transformer; (ii) channel-independence where each channel contains a single univariate time series that shares the same embedding and Transformer weights across all the series. Patching design naturally has three-fold benefit: local semantic information is retained in the embedding; computation and memory usage of the attention maps are quadratically reduced given the same look-back window; and the model can attend longer history. Our channel-independent patch time series Transformer (PatchTST) can improve the long-term forecasting accuracy significantly when compared with that of SOTA Transformer-based models. We also apply our model to self-supervised pre-training tasks and attain excellent fine-tuning performance, which outperforms supervised training on large datasets. Transferring of masked pre-trained representation on one dataset to others also produces SOTA forecasting accuracy. Code is available at: https://github.com/yuqinie98/PatchTST.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Nie, Yuqi and Nguyen, Nam H. and Sinthong, Phanwadee and Kalagnanam, Jayant},
+	month = mar,
+	year = {2023},
+	note = {arXiv:2211.14730 [cs.LG]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Machine Learning},
+	annote = {Comment: Accepted by ICLR 2023},
+	annote = {PatchTST:Patching范式开创者，通道独立建模。监督学习模型（非预训练），6个标准基准数据集在信号特征空间高度集中（均呈强周期模式），缺乏高非平稳、高噪声覆盖。
+
+**参考价值**：(1) 标准基准结构单一性的证据；(2) 重要实验Baseline。
+},
+}
+
+@misc{pang_temporal-decay_2026,
+	title = {Temporal-{Decay} {Shapley}: {A} {Time}-{Aware} {Data} {Valuation} {Framework} for {Time}-{Series} {Data}},
+	shorttitle = {Temporal-{Decay} {Shapley}},
+	url = {http://arxiv.org/abs/2605.08153},
+	doi = {10.48550/arXiv.2605.08153},
+	abstract = {With the rapid development of machine learning applications on time-series data, accurately assessing the value of training samples has become essential for data selection, noise detection, and model optimization. However, traditional data valuation methods usually assume that samples are independent and identically distributed, and thus ignore the time-varying nature of sample value in time-series data. This paper proposes an improved temporal Shapley data valuation method that enables accurate sample valuation for time-series data through a temporal decay mechanism and a multi-scale fusion strategy. Specifically, we propose three progressively enhanced temporal Shapley methods. Temporal-Decay Shapley (TDS) incorporates temporal information into Shapley value computation through exponential decay weights; the improved TDS adopts power exponential decay to better adapt to nonlinear temporal drift; and Multi-Scale Temporal-Decay Shapley (MS-TDS) constructs a multi-scale fusion mechanism that balances the value of short-term hotspot samples and long-term foundational samples through parallel multi-scale valuation and sample-level adaptive fusion. Experimental results show that the proposed methods generally outperform traditional methods in noise detection and high-value data identification tasks, with more evident advantages under most strongly temporal settings, thereby effectively improving the accuracy and robustness of data valuation.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Pang, Chuwen and Mi, Bing and Chen, Kongyang},
+	month = may,
+	year = {2026},
+	note = {arXiv:2605.08153 [cs.LG]},
+	keywords = {Computer Science - Computer Science and Game Theory, Computer Science - Machine Learning},
+	annote = {时序数据估值框架，时间衰减Shapley值+多尺度融合。兼顾短期热点和长期基础样本价值。
+
+**参考价值**：数据估值的理论基础，但其维度是时间衰减而非信号结构特征。本研究将估值维度从"时间重要性"扩展到"结构空间覆盖度"。
+},
+}
+
+@misc{wu_rating_2026,
+	title = {Rating {Quality} of {Diverse} {Time} {Series} {Data} by {Meta}-learning from {LLM} {Judgment}},
+	url = {http://arxiv.org/abs/2506.01290},
+	doi = {10.48550/arXiv.2506.01290},
+	abstract = {High-quality time series (TS) data are essential for ensuring TS model performance, rendering research on rating TS data quality indispensable. Existing methods have shown promising rating accuracy within individual domains, primarily by extending data quality rating techniques such as influence functions and Shapley values to account for temporal characteristics. However, they neglect the fact that real-world TS data can span vastly different domains and exhibit distinct properties, hampering the accurate and efficient rating of diverse TS data. In this paper, we propose TSRating, a novel and unified framework for rating the quality of time series data crawled from diverse domains. TSRating leverages LLMs' inherent ample knowledge, acquired during their extensive pretraining, to comprehend and discern quality differences in diverse TS data. We verify this by devising a series of prompts to elicit quality comparisons from LLMs for pairs of TS samples. We then fit a dedicated rating model, termed TSRater, to convert the LLMs' judgments into efficient quality predictions by inferring future TS samples through TSRater's inference. To ensure cross-domain adaptability, we develop a meta-learning scheme to train TSRater on quality comparisons collected from nine distinct domains. To improve training efficiency, we employ signSGD for inner-loop updates, thus circumventing the demanding computation of hypergradients. Extensive experimental results on eleven benchmark datasets across three time series tasks, each using both conventional TS models and TS foundation models, demonstrate that TSRating outperforms baselines in terms of estimation accuracy, efficiency, and domain adaptability.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Wu, Shunyu and Li, Dan and Feng, Wenjie and Ye, Haozheng and Lou, Jian and Ng, See-Kiong},
+	month = mar,
+	year = {2026},
+	note = {arXiv:2506.01290 [cs.LG]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Machine Learning},
+	annote = {Comment: Accepted at ICLR 2026},
+	annote = {LLM元学习评估时序数据质量，跨域通用评分函数。
+
+**参考价值**：数据质量评分→数据选择的范式参考。但其评分维度是LLM判断的"质量"，而非数学信号特征的结构覆盖度。
+},
+}
+
+@misc{li_timerft_2026,
+	title = {{TimeRFT}: {Stimulating} {Generalizable} {Time} {Series} {Forecasting} for {TSFMs} via {Reinforcement} {Finetuning}},
+	shorttitle = {{TimeRFT}},
+	url = {http://arxiv.org/abs/2605.00015},
+	doi = {10.48550/arXiv.2605.00015},
+	abstract = {Time Series Foundation Models (TSFMs) advance generalization and data efficiency in time series forecasting by unified large-scale pretraining. But TSFMs remain lacking when adapting to specific downstream forecasting tasks for two reasons. First, the non-stationary and uncertain nature of time series data lead to inevitable temporal distribution shifts between historical training and future testing data, while current Supervised FineTuning (SFT)-based methods are prone to overfitting and may degrade generalization. Second, training data availability varies across forecasting tasks, requiring TSFMs to generalize well under diverse data regimes. To address these challenges, we introduce the Time series Reinforcement Finetuning (TimeRFT) paradigm for TSFM downstream adaptation, which consists of two task-specific training recipes: i) A forecasting quality-based temporal reward mechanism that conducts a multi-faceted evaluation of the contribution of each prediction step to overall forecasting accuracy. ii) A forecasting difficulty-based data selection strategy to identify time series samples with generalizable predictive patterns and informative training signals. Extensive experiments demonstrate TimeRFT can consistently outperform SFT-based adaptation methods across various real-world forecasting tasks and training data regimes, enhancing prediction accuracy and generalization against unforeseen distribution shifts.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Li, Siyang and Chen, Yize and Zhu, Zijie and Pan, Yuxin and Guo, Yan and Huang, Ming and Xiong, Hui},
+	month = apr,
+	year = {2026},
+	note = {arXiv:2605.00015 [eess.SP]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Computer Vision and Pattern Recognition, Computer Science - Machine Learning, Electrical Engineering and Systems Science - Signal Processing},
+	annote = {基于预测难度的数据选择+强化学习微调。难度适中且泛化性强的样本优先。
+
+**参考价值**：证明难度导向数据选择对TSFM有益。但(1)依赖模型反馈（model-dependent），不适用预训练阶段；(2)用于微调而非预训练。本研究用数学信号特征替代模型反馈，使CL可在预训练阶段使用。
+},
+	annote = {Comment: 14 pages, 6 figures, In Submission},
+}
+
+@misc{feng_only_2024,
+	title = {Only the {Curve} {Shape} {Matters}: {Training} {Foundation} {Models} for {Zero}-{Shot} {Multivariate} {Time} {Series} {Forecasting} through {Next} {Curve} {Shape} {Prediction}},
+	shorttitle = {Only the {Curve} {Shape} {Matters}},
+	url = {http://arxiv.org/abs/2402.07570},
+	doi = {10.48550/arXiv.2402.07570},
+	abstract = {We present General Time Transformer (GTT), an encoder-only style foundation model for zero-shot multivariate time series forecasting. GTT is pretrained on a large dataset of 200M high-quality time series samples spanning diverse domains. In our proposed framework, the task of multivariate time series forecasting is formulated as a channel-wise next curve shape prediction problem, where each time series sample is represented as a sequence of non-overlapping curve shapes with a unified numerical magnitude. GTT is trained to predict the next curve shape based on a window of past curve shapes in a channel-wise manner. Experimental results demonstrate that GTT exhibits superior zero-shot multivariate forecasting capabilities on unseen time series datasets, even surpassing state-of-the-art supervised baselines. Additionally, we investigate the impact of varying GTT model parameters and training dataset scales, observing that the scaling law also holds in the context of zero-shot multivariate time series forecasting.},
+	urldate = {2026-06-07},
+	publisher = {arXiv},
+	author = {Feng, Cheng and Huang, Long and Krompass, Denis},
+	month = feb,
+	year = {2024},
+	note = {arXiv:2402.07570 [cs.LG]},
+	keywords = {Computer Science - Artificial Intelligence, Computer Science - Machine Learning},
+	annote = {证明只有模式（曲线形状）最重要：曲线形状预测范式，200M样本预训练。曲线形状复杂度天然形成隐式课程学习（简单趋势→平滑形状→复杂季节性）。
+
+**参考价值**：GTT观察到"曲线形状复杂度→学习难度"的关系，为本研究的"信号特征→难度"提供直觉支撑。但GTT的CL是被动涌现的，本研究是主动设计的7维结构空间膨胀。
+},
+}

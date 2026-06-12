@@ -1,0 +1,147 @@
+# ================================================
+# Allowlist strategy: ignore everything, then only allow plain-text files
+# ================================================
+
+# --- Ignore all files, but keep directories traversable ---
+*
+!*/
+
+# --- Plain-text documents ---
+!*.md
+!*.txt
+!*.rst
+!*.tex
+!*.bib
+!*.csv
+!*.tsv
+!*.log
+
+# --- Configuration files ---
+!*.json
+!*.yaml
+!*.yml
+!*.toml
+!*.ini
+!*.cfg
+!*.conf
+!*.env
+!*.env.*
+!*.editorconfig
+!.gitignore
+!.gitattributes
+
+# --- Scripts / programming languages ---
+!*.py
+!*.js
+!*.mjs
+!*.cjs
+!*.ts
+!*.jsx
+!*.tsx
+!*.sh
+!*.bash
+!*.zsh
+!*.fish
+!*.rb
+!*.php
+!*.pl
+!*.pm
+!*.lua
+!*.go
+!*.rs
+!*.java
+!*.scala
+!*.kt
+!*.kts
+!*.swift
+!*.c
+!*.cpp
+!*.cxx
+!*.cc
+!*.h
+!*.hpp
+!*.hxx
+!*.hh
+!*.m
+!*.mm
+!*.r
+!*.jl
+
+# --- Web ---
+!*.html
+!*.htm
+!*.css
+!*.scss
+!*.sass
+!*.less
+!*.svg
+!*.xml
+!*.xsl
+!*.xslt
+
+# --- Data / serialization (plain-text) ---
+!*.geojson
+!*.topojson
+!*.jsonl
+!*.ndjson
+
+# --- Notebooks / literate programming ---
+!*.ipynb
+!*.qmd
+!*.rmd
+
+# --- Diff / patch ---
+!*.diff
+!*.patch
+
+# --- Package-management / lock files ---
+!Makefile
+!makefile
+!Dockerfile
+!CMakeLists.txt
+!*.cmake
+!*.mk
+!*.lock
+!Pipfile
+!Gemfile
+!Rakefile
+!Cargo.toml
+!Cargo.lock
+!go.mod
+!go.sum
+!package.json
+!requirements*.txt
+!pyproject.toml
+!setup.cfg
+
+# --- Git internals ---
+!.gitmodules
+!COMMIT_EDITMSG
+!MERGE_MSG
+
+# --- Other text-based configs ---
+!*.plist
+
+# --- Always-excluded cache / tool directories ---
+__pycache__/
+node_modules/
+.claude/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.tox/
+.nox/
+.eggs/
+*.egg-info/
+dist/
+build/
+.next/
+.nuxt/
+.vite/
+.parcel-cache/
+.vscode/
+.idea/
+.npm/
+.yarn/
